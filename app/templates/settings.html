@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Settings</h1></div>
+
+{% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
+
+<div class="card">
+  <h2>Application</h2>
+  <form method="post" action="/settings/app">
+    <label class="field-block">
+      <span>Slack channel name template</span>
+      <input name="slack_channel_name_template" value="{{ app.slack_channel_name_template }}">
+    </label>
+    <p class="muted" style="margin:0 0 12px; font-size:12.5px">Placeholders: <code>{date}</code>, <code>{slug}</code>. Used when an incident opens its Slack room.</p>
+    <button class="btn btn-primary" type="submit">Save</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Email (SMTP)</h2>
+  <form method="post" action="/settings/smtp">
+    <div class="form-row">
+      <label class="field-block grow"><span>Host</span><input name="host" value="{{ smtp.host or '' }}"></label>
+      <label class="field-block"><span>Port</span><input name="port" type="number" value="{{ smtp.port or '' }}"></label>
+    </div>
+    <div class="form-row">
+      <label class="field-block grow"><span>Username</span><input name="username" value="{{ smtp.username or '' }}"></label>
+      <label class="field-block grow"><span>Password</span><input name="password" type="password" placeholder="{{ 'leave blank to keep current' if smtp.password else '' }}"></label>
+    </div>
+    <div class="form-row">
+      <label class="field-block grow"><span>From address</span><input name="from_address" value="{{ smtp.from_address or '' }}"></label>
+      <label class="check"><input type="checkbox" name="use_tls" value="true" {{ 'checked' if smtp.use_tls else '' }}> STARTTLS</label>
+    </div>
+    <button class="btn btn-primary" type="submit">Save SMTP</button>
+  </form>
+  <form method="post" action="/settings/smtp/test" style="margin-top:10px">
+    <button class="btn" type="submit" {{ 'disabled' if not smtp_configured else '' }}>Send test email</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Slack</h2>
+  <form method="post" action="/settings/slack">
+    <label class="field-block"><span>Client ID</span><input name="client_id" value="{{ slack.client_id or '' }}"></label>
+    <div class="form-row">
+      <label class="field-block grow"><span>Client secret</span><input name="client_secret" type="password" placeholder="{{ 'leave blank to keep current' if slack.client_secret else '' }}"></label>
+      <label class="field-block grow"><span>Signing secret</span><input name="signing_secret" type="password" placeholder="{{ 'leave blank to keep current' if slack.signing_secret else '' }}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="enabled" value="true" {{ 'checked' if slack.enabled else '' }}> Enabled</label>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Save Slack</button></div>
+  </form>
+  <p class="muted" style="margin:10px 0 0; font-size:12.5px">Redirect URL for your Slack app: <code>{{ base_url }}/connections/slack/callback</code>. Then connect a workspace from <a href="/connections">Connections</a>.</p>
+</div>
+
+<div class="card">
+  <h2>Google</h2>
+  <form method="post" action="/settings/google">
+    <label class="field-block"><span>Client ID</span><input name="client_id" value="{{ google.client_id or '' }}"></label>
+    <label class="field-block"><span>Client secret</span><input name="client_secret" type="password" placeholder="{{ 'leave blank to keep current' if google.client_secret else '' }}"></label>
+    <label class="check"><input type="checkbox" name="enabled" value="true" {{ 'checked' if google.enabled else '' }}> Enabled</label>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Save Google</button></div>
+  </form>
+  <p class="muted" style="margin:10px 0 0; font-size:12.5px">Redirect URLs: <code>{{ base_url }}/auth/google/callback</code> (SSO) and <code>{{ base_url }}/connections/google/callback</code> (Meet).</p>
+</div>
+
+<div class="card">
+  <h2>Google SSO</h2>
+  <form method="post" action="/settings/sso">
+    <label class="check"><input type="checkbox" name="sso_enabled" value="true" {{ 'checked' if sso.sso_enabled else '' }}> Allow Google sign-in</label><br>
+    <label class="check"><input type="checkbox" name="allow_local_login" value="true" {{ 'checked' if sso.allow_local_login else '' }}> Allow local password login (the admin can always sign in locally)</label>
+    <label class="field-block" style="margin-top:10px"><span>Allowed domains (comma-separated)</span><input name="allowed_domains" value="{{ sso.allowed_domains or '' }}"></label>
+    <button class="btn btn-primary" type="submit">Save SSO</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Severity levels</h2>
+  {% if severity_levels %}
+  <table style="width:100%; border-collapse:collapse; margin-bottom:16px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:6px 8px">Label</th>
+        <th style="text-align:left; padding:6px 8px">Colour</th>
+        <th style="text-align:left; padding:6px 8px">Rank</th>
+        <th style="text-align:left; padding:6px 8px">Default</th>
+        <th style="text-align:left; padding:6px 8px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lvl in severity_levels %}
+      <tr>
+        <td style="padding:6px 8px">{{ lvl.label }}</td>
+        <td style="padding:6px 8px">
+          <span style="display:inline-block; width:18px; height:18px; border-radius:3px; background:{{ lvl.color }}; vertical-align:middle; margin-right:6px"></span>
+          <span style="color:{{ lvl.color }}">{{ lvl.color }}</span>
+        </td>
+        <td style="padding:6px 8px">{{ lvl.rank }}</td>
+        <td style="padding:6px 8px">
+          {% if lvl.is_default %}<span class="badge-yes">default</span>
+          {% else %}<form method="post" action="/settings/severity/{{ lvl.id }}/default" style="display:inline"><button class="btn btn-sm" type="submit">Make default</button></form>{% endif %}
+        </td>
+        <td style="padding:6px 8px">
+          <form method="post" action="/settings/severity/{{ lvl.id }}/delete" style="display:inline">
+            <button class="btn" type="submit" onclick="return confirm('Delete {{ lvl.label }}?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-bottom:16px">No severity levels defined yet.</p>
+  {% endif %}
+
+  <h3 style="margin-bottom:10px">Add severity level</h3>
+  <form method="post" action="/settings/severity">
+    <div class="form-row">
+      <label class="field-block grow"><span>Label</span><input name="label" required maxlength="40"></label>
+      <label class="field-block"><span>Colour</span><input type="color" name="color" value="#808080" required></label>
+      <label class="field-block"><span>Rank</span><input type="number" name="rank" value="100" min="1"></label>
+    </div>
+    <label class="check" style="margin-bottom:12px"><input type="checkbox" name="is_default" value="true"> Set as default</label>
+    <div><button class="btn btn-primary" type="submit">Add level</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Services</h2>
+  {% if services %}
+  <table style="width:100%; border-collapse:collapse; margin-bottom:16px">
+    <thead>
+      <tr>
+        <th style="text-align:left; padding:6px 8px">Name</th>
+        <th style="text-align:left; padding:6px 8px">Description</th>
+        <th style="text-align:left; padding:6px 8px">Dependencies</th>
+        <th style="text-align:left; padding:6px 8px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for svc in services %}
+      <tr>
+        <td style="padding:6px 8px">{{ svc.name }}</td>
+        <td style="padding:6px 8px">{{ svc.description or '' }}</td>
+        <td style="padding:6px 8px">
+          <form method="post" action="/settings/services/{{ svc.id }}/deps" style="display:inline-flex; align-items:center; gap:8px">
+            {% set other_services = services | selectattr('id', '!=', svc.id) | list %}
+            {% if other_services %}
+            <select name="depends_on_ids" multiple style="min-width:160px">
+              {% for other in other_services %}
+              <option value="{{ other.id }}" {{ 'selected' if other in svc.depends_on else '' }}>{{ other.name }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn" type="submit">Save</button>
+            {% else %}
+            <span class="muted" style="font-size:12.5px">No other services</span>
+            {% endif %}
+          </form>
+        </td>
+        <td style="padding:6px 8px">
+          <form method="post" action="/settings/services/{{ svc.id }}/delete" style="display:inline">
+            <button class="btn" type="submit" onclick="return confirm('Delete {{ svc.name }}?')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-bottom:16px">No services defined yet.</p>
+  {% endif %}
+
+  <h3 style="margin-bottom:10px">Add service</h3>
+  <form method="post" action="/settings/services">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120"></label>
+      <label class="field-block grow"><span>Description</span><input name="description" maxlength="500"></label>
+    </div>
+    <div><button class="btn btn-primary" type="submit">Add service</button></div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ic}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ic}
+      POSTGRES_DB: ${POSTGRES_DB:-incident_commander}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ic}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ic}:${POSTGRES_PASSWORD:-ic}@db:5432/${POSTGRES_DB:-incident_commander}
+      SESSION_SECRET: ${SESSION_SECRET}
+      FERNET_KEYS: ${FERNET_KEYS}
+      BASE_URL: ${BASE_URL:-http://localhost:8000}
+      IC_ADMIN_EMAIL: ${IC_ADMIN_EMAIL:-admin@localhost}
+      # false for plain-HTTP localhost; set true (code default) in production behind HTTPS.
+      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
+    ports:
+      - "8000:8000"
+
+  mailpit:
+    image: axllent/mailpit:v1.21
+    profiles: ["dev"]
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  pgdata:

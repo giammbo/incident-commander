@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Groups</h1><span class="stats">{{ groups | length }} total</span></div>
+
+<div class="card">
+  <h2>New group</h2>
+  <form class="form-row" method="post" action="/groups">
+    <input class="grow" name="name" placeholder="group name" required autocomplete="off">
+    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r.value }}">{{ r.value }}</option>{% endfor %}</select>
+    <button class="btn btn-primary" type="submit">Create group</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Existing groups</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Role</th><th>Type</th></tr></thead>
+    <tbody>
+    {% for g in groups %}
+      <tr>
+        <td>{{ g.name }}</td>
+        <td><span class="role" data-role="{{ g.role.value }}">{{ g.role.value }}</span></td>
+        <td>{% if g.is_system %}<span class="muted">system</span>{% else %}custom{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p><a class="backlink" href="/users">← Back to users</a></p>
+{% endblock %}

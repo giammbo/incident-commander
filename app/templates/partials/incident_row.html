@@ -1,0 +1,21 @@
+<div class="incident" id="incident-{{ i.id }}" data-status="{{ i.status.value }}" style="--sev-color: {{ i.severity_level.color if i.severity_level else '#5E7180' }}">
+  <span class="sev">{{ i.severity_level.label if i.severity_level else '—' }}</span>
+  <div class="inc-main">
+    <a class="inc-title" href="/incidents/{{ i.id }}">{{ i.title }}</a>
+    <div class="inc-meta">
+      <span>{{ i.created_at.strftime("%b %d · %H:%M") if i.created_at else "" }}</span>
+      {% if i.is_private %}<span class="lock">· private</span>{% endif %}
+      {% if i.slack_channel_url %}<a class="chip" href="{{ i.slack_channel_url }}">Slack</a>{% endif %}
+      {% if i.meet_url %}<a class="chip" href="{{ i.meet_url }}">Meet</a>{% endif %}
+    </div>
+  </div>
+  <span class="status" data-status="{{ i.status.value }}">
+    <span class="dot" aria-hidden="true"></span>{{ i.status.value | upper }}
+  </span>
+  <span class="row-actions">
+    {% if i.status.value == "open" %}
+      <button class="btn btn-sm" hx-post="/incidents/{{ i.id }}/close"
+              hx-target="#incident-{{ i.id }}" hx-swap="outerHTML">Close</button>
+    {% endif %}
+  </span>
+</div>

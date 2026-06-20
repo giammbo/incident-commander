@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Connections</h1></div>
+{% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
+
+<div class="card">
+  <h2>Slack</h2>
+  {% if slack_connections %}
+    <table>
+      <thead><tr><th>Workspace</th><th>Team ID</th><th>Bot</th></tr></thead>
+      <tbody>
+      {% for c in slack_connections %}
+        <tr><td>{{ c.team_name or "—" }}</td><td class="muted">{{ c.team_id }}</td><td class="muted">{{ c.bot_user_id or "—" }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No Slack workspaces connected yet.</p>
+  {% endif %}
+  {% if slack_configured %}
+    <div style="margin-top:12px"><a class="btn btn-primary" href="/connections/slack/install">Add to Slack</a></div>
+  {% else %}
+    <p class="muted">Configure Slack credentials in <a href="/settings">Settings</a> to connect a workspace.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Google</h2>
+  {% if google_connections %}
+    <table>
+      <thead><tr><th>Account</th><th>Sub</th><th>Calendar</th></tr></thead>
+      <tbody>
+      {% for c in google_connections %}
+        <tr><td>{{ c.account_email }}</td><td class="muted">{{ c.account_sub or "—" }}</td><td class="muted">{{ c.calendar_id }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No Google accounts connected yet.</p>
+  {% endif %}
+  {% if google_configured %}
+    <div style="margin-top:12px"><a class="btn btn-primary" href="/connections/google/connect">Connect Google</a></div>
+  {% else %}
+    <p class="muted">Configure Google credentials in <a href="/settings">Settings</a> to connect an account.</p>
+  {% endif %}
+</div>
+{% endblock %}

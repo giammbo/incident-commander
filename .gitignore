@@ -1,0 +1,16 @@
+# Internal planning/design docs — never committed
+docs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Env / secrets
+.env
+
+# OS
+.DS_Store

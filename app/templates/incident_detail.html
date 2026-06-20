@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel" style="--sev-color: {{ i.severity_level.color if i.severity_level else '#5E7180' }}">
+  <div class="page-head" style="margin-bottom:6px">
+    <span class="sev">{{ i.severity_level.label if i.severity_level else '—' }}</span>
+    <h1 style="margin:0">{{ i.title }}</h1>
+  </div>
+  <span class="status" data-status="{{ i.status.value }}">
+    <span class="dot" aria-hidden="true"></span>{{ i.status.value | upper }}
+  </span>
+
+  {% if i.description %}<div class="panel-desc">{{ i.description | markdown | safe }}</div>{% endif %}
+
+  {% if "failed" in (i.creation_state or {}).values() %}
+  <div class="alert">Some integration steps failed:
+    {% for k, v in i.creation_state.items() %}{% if v == "failed" %}<code>{{ k }}</code> {% endif %}{% endfor %}
+    — check the integration connection and try again.</div>
+  {% endif %}
+
+  <dl class="kv">
+    <dt>Opened</dt><dd>{{ i.created_at.strftime("%Y-%m-%d %H:%M UTC") if i.created_at else "—" }}</dd>
+    {% if i.closed_at %}<dt>Closed</dt><dd>{{ i.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>{% endif %}
+    <dt>Visibility</dt><dd>{{ "Private" if i.is_private else "Public" }}</dd>
+    <dt>Slack room</dt><dd>{% if i.slack_channel_url %}<a class="chip" href="{{ i.slack_channel_url }}">{{ i.slack_channel_name or "open" }}</a>{% else %}—{% endif %}</dd>
+    <dt>Meet</dt><dd>{% if i.meet_url %}<a class="chip" href="{{ i.meet_url }}">join</a>{% else %}—{% endif %}</dd>
+  </dl>
+
+  {% if i.services %}
+  <div class="kv"><dt>Services</dt><dd>
+    {% for s in i.services %}
+      <div><strong>{{ s.name }}</strong>{% if s.depends_on %} <span class="muted">depends on: {{ s.depends_on | map(attribute='name') | join(', ') }}</span>{% endif %}</div>
+    {% endfor %}
+  </dd></div>
+  {% endif %}
+
+  {% set _role = effective_role(current_user) %}
+  {% if _role and _role.value in ("admin", "incident_commander") %}
+  <details style="margin-top:1rem">
+    <summary style="cursor:pointer;font-weight:600">Edit incident</summary>
+    <form method="post" action="/incidents/{{ i.id }}/edit" style="margin-top:.75rem">
+      <div style="margin-bottom:.5rem">
+        <label for="edit-title">Title</label><br>
+        <input id="edit-title" name="title" type="text" value="{{ i.title }}" required style="width:100%">
+      </div>
+      <div style="margin-bottom:.5rem">
+        <label for="edit-description">Description</label><br>
+        <textarea id="edit-description" name="description" rows="4" style="width:100%">{{ i.description or "" }}</textarea>
+      </div>
+      <div style="margin-bottom:.5rem">
+        <label for="edit-severity">Severity</label><br>
+        <select id="edit-severity" name="severity_level_id" required>
+          {% for lvl in severity_levels %}
+          <option value="{{ lvl.id }}"{% if lvl.id == i.severity_level_id %} selected{% endif %}>{{ lvl.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if services %}
+      <div style="margin-bottom:.5rem">
+        <label for="edit-services">Services</label><br>
+        <select id="edit-services" name="service_ids" multiple size="4" style="width:100%">
+          {% for svc in services %}
+          <option value="{{ svc.id }}"{% if svc in i.services %} selected{% endif %}>{{ svc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <button class="btn" type="submit">Save changes</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if i.status.value == "open" %}
+  <form method="post" action="/incidents/{{ i.id }}/close" style="display:inline">
+    <button class="btn" type="submit">Close incident</button>
+  </form>
+  {% endif %}
+  <a class="backlink" href="/">← All incidents</a>
+</div>
+{% endblock %}

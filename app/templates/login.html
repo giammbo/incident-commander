@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="auth">
+  <form class="auth-card" method="post" action="/login">
+    <div class="mark">Incident Commander</div>
+    <h1>Sign in</h1>
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    <label class="field"><span>Email</span><input type="email" name="email" required autofocus></label>
+    <label class="field"><span>Password</span><input type="password" name="password" required></label>
+    <button class="btn btn-primary" type="submit">Sign in</button>
+  </form>
+  {% if sso_enabled %}<a class="btn" href="/login/google" style="width:100%;justify-content:center;margin-top:10px">Sign in with Google</a>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+{% set open_count = incidents | selectattr('status.value', 'equalto', 'open') | list | length %}
+<div class="page-head">
+  <h1>Incidents</h1>
+  <span class="stats"><b>{{ open_count }}</b> open <span class="sep">/</span> {{ incidents | length }} total</span>
+</div>
+
+<form class="create" hx-post="/incidents" hx-target="#incident-list" hx-swap="afterbegin">
+  <input class="title-input" name="title" placeholder="What's happening?" required autocomplete="off">
+  <select name="severity_level_id" aria-label="Severity">
+    {% for lvl in severity_levels %}<option value="{{ lvl.id }}" {{ 'selected' if lvl.id == default_severity_level_id }}>{{ lvl.label }}</option>{% endfor %}
+  </select>
+  <textarea name="description" placeholder="Description (Markdown supported)"></textarea>
+  {% if services %}<select name="service_ids" multiple aria-label="Affected services">{% for s in services %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>{% endif %}
+  <label class="check"><input type="checkbox" name="is_private" value="true"> Private</label>
+  {% if slack_connections %}
+  <select name="slack_connection_id" aria-label="Slack workspace">
+    <option value="">No Slack</option>
+    {% for c in slack_connections %}<option value="{{ c.id }}">{{ c.team_name or c.team_id }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  {% if google_connections %}
+  <select name="google_connection_id" aria-label="Google Meet">
+    <option value="">No Meet</option>
+    {% for c in google_connections %}<option value="{{ c.id }}">{{ c.account_email }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <button class="btn btn-primary" type="submit">Declare incident</button>
+</form>
+
+<div class="incident-list" id="incident-list">
+  {% for i in incidents %}{% include "partials/incident_row.html" %}{% endfor %}
+  <div class="empty">No incidents. The board is quiet.</div>
+</div>
+{% endblock %}

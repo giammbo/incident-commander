@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}Incident Commander{% endblock %}</title>
+  <script src="/static/htmx.min.js" defer></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {% if current_user %}
+  <header class="topbar">
+    <a class="brand" href="/"><span class="pulse" aria-hidden="true"></span>Incident&nbsp;Commander</a>
+    {% set _role = effective_role(current_user) %}
+    <nav class="nav">
+      <a href="/">Incidents</a>
+      {% if _role and _role.value in ("admin", "incident_commander") %}<a href="/connections">Connections</a>{% endif %}
+      {% if _role and _role.value == "admin" %}
+        <a href="/users">Users</a>
+        <a href="/settings">Settings</a>
+      {% endif %}
+    </nav>
+    <span class="userbox">
+      <span class="who">{{ current_user.email }}</span>
+      <a href="/logout">Sign out</a>
+    </span>
+  </header>
+  {% endif %}
+  <main class="main">{% block content %}{% endblock %}</main>
+</body>
+</html>

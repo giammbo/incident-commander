@@ -1,0 +1,6 @@
+You've been invited to Incident Commander.
+
+Set your password and activate your account:
+{{ accept_url }}
+
+This link expires in {{ ttl_hours }} hours. If you weren't expecting this, ignore this email.

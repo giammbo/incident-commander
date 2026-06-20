@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="auth">
+  <form class="auth-card" method="post" action="/invite/accept">
+    <div class="mark">Incident Commander</div>
+    <h1>Set your password</h1>
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if valid %}
+      <input type="hidden" name="token" value="{{ token }}">
+      <label class="field"><span>New password</span><input type="password" name="new_password" required autofocus></label>
+      <label class="field"><span>Confirm</span><input type="password" name="confirm" required></label>
+      <button class="btn btn-primary" type="submit">Activate account</button>
+    {% else %}
+      <p class="muted">Ask an administrator for a new invitation.</p>
+      <a class="btn" href="/login">Back to sign in</a>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}
