@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.db import get_db
 from app.main import create_app
 from app.models import Role, SeverityLevel
+from app.services import statuses
 from app.services.users import bootstrap_admin, create_user
 
 
@@ -22,6 +23,8 @@ def _login(client, db_session, email, role):
 
 
 def _sev(db_session):
+    statuses.seed_status_levels(db_session)
+    db_session.flush()
     lvl = SeverityLevel(label="SEV1", color="#FF5D5D", rank=1, is_default=False)
     db_session.add(lvl)
     db_session.flush()
@@ -58,3 +61,31 @@ def test_ic_can_create_and_close(client, db_session):
     r2 = client.post(f"/incidents/{inc.id}/close", headers={"HX-Request": "true"})
     assert r2.status_code == 200
     assert "closed" in r2.text.lower()
+
+
+def test_create_incident_with_system_and_component(client, db_session):
+    # reuse this file's real helper: _login(client, db_session, email, role)
+    from sqlalchemy import select
+
+    from app.models import Incident, Role, SeverityLevel
+    from app.services.catalog import create_component, create_system
+
+    _login(client, db_session, "ic@x.io", Role.incident_commander)
+    lvl = SeverityLevel(label="SEV1", color="#FF5D5D", rank=1, is_default=True)
+    db_session.add(lvl)
+    s = create_system(db_session, name="Billing")
+    db_session.flush()
+    c = create_component(db_session, name="Invoicer", system_id=s.id)
+    db_session.flush()
+    client.post(
+        "/incidents",
+        data={
+            "title": "Down",
+            "severity_level_id": str(lvl.id),
+            "system_id": str(s.id),
+            "component_ids": [str(c.id)],
+        },
+        headers={"HX-Request": "true"},
+    )
+    inc = db_session.scalar(select(Incident).order_by(Incident.id.desc()))
+    assert inc.system_id == s.id and [x.name for x in inc.components] == ["Invoicer"]

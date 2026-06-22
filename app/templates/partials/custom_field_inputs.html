@@ -1,0 +1,20 @@
+{% for f in fields %}
+<label class="field-block"><span>{{ f.label }}{% if f.required %} *{% endif %}</span>
+{% if f.field_type == "textarea" %}
+  <textarea name="cf_{{ f.id }}" style="width:100%">{{ values.get(f.id, "") }}</textarea>
+{% elif f.field_type == "select" %}
+  <select name="cf_{{ f.id }}"><option value="">—</option>{% for o in f.options_list %}<option value="{{ o }}"{% if values.get(f.id) == o %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+{% elif f.field_type == "multi_select" %}
+  {% set chosen = values.get(f.id) | from_json if values.get(f.id) else [] %}
+  <select name="cf_{{ f.id }}" multiple>{% for o in f.options_list %}<option value="{{ o }}"{% if o in chosen %} selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+{% elif f.field_type == "checkbox" %}
+  <input type="checkbox" name="cf_{{ f.id }}" value="true"{% if values.get(f.id) == "true" %} checked{% endif %}>
+{% elif f.field_type == "number" %}
+  <input type="number" step="any" name="cf_{{ f.id }}" value="{{ values.get(f.id, '') }}">
+{% elif f.field_type == "date" %}
+  <input type="date" name="cf_{{ f.id }}" value="{{ values.get(f.id, '') }}">
+{% else %}
+  <input type="text" name="cf_{{ f.id }}" value="{{ values.get(f.id, '') }}">
+{% endif %}
+</label>
+{% endfor %}

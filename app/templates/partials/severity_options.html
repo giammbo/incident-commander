@@ -1,0 +1,1 @@
+{% for lvl in severity_levels %}<option value="{{ lvl.id }}"{% if lvl.id == selected_id %} selected{% endif %}>{{ lvl.label }}</option>{% endfor %}

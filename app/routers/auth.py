@@ -13,16 +13,14 @@ from app.templating import templates
 router = APIRouter()
 
 
-def _sso_enabled(db: Session) -> bool:
+def _sso_context(db: Session) -> dict:
     sso = sso_settings(db)
-    return bool(sso.sso_enabled)
+    return {"sso_enabled": bool(sso.sso_enabled), "sso_display_name": sso.display_name}
 
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse(
-        request, "login.html", {"error": None, "sso_enabled": _sso_enabled(db)}
-    )
+    return templates.TemplateResponse(request, "login.html", {"error": None, **_sso_context(db)})
 
 
 @router.post("/login")
@@ -37,7 +35,7 @@ def login_submit(
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "Invalid credentials", "sso_enabled": _sso_enabled(db)},
+            {"error": "Invalid credentials", **_sso_context(db)},
             status_code=401,
         )
     sso = sso_settings(db)
@@ -45,7 +43,11 @@ def login_submit(
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "Local login is disabled — sign in with Google.", "sso_enabled": True},
+            {
+                "error": "Local login is disabled — sign in with SSO.",
+                "sso_enabled": True,
+                "sso_display_name": sso.display_name,
+            },
             status_code=401,
         )
     login_user(request, user)

@@ -9,6 +9,6 @@
     <label class="field"><span>Password</span><input type="password" name="password" required></label>
     <button class="btn btn-primary" type="submit">Sign in</button>
   </form>
-  {% if sso_enabled %}<a class="btn" href="/login/google" style="width:100%;justify-content:center;margin-top:10px">Sign in with Google</a>{% endif %}
+  {% if sso_enabled %}<a class="btn" href="/login/oidc" style="width:100%;justify-content:center;margin-top:10px">Sign in with {{ sso_display_name or "SSO" }}</a>{% endif %}
 </div>
 {% endblock %}

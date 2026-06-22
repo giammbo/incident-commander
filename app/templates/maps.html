@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Service map</h1>
+  <span class="map-legend">
+    <span class="dot" style="background:#FF5D5D"></span>down
+    <span class="dot" style="background:#F4B740"></span>impacted
+    <span class="dot" style="background:#56B6E6"></span>ok
+    <span class="muted" style="margin-left:10px">large = system · small = component</span>
+  </span>
+</div>
+<div id="graph-wrap">
+  <div id="graph"></div>
+  <div id="graph-labels"></div>
+</div>
+<script src="/static/3d-force-graph.min.js"></script>
+<script>
+(function () {
+  var graphEl = document.getElementById("graph");
+  var labelsEl = document.getElementById("graph-labels");
+  if (typeof ForceGraph3D === "undefined") { graphEl.textContent = "3D library failed to load."; return; }
+  var COLORS = { down: "#FF5D5D", impacted: "#F4B740", ok: "#56B6E6" };
+  var nodes = [];
+  var labelEls = {};
+
+  var Graph = ForceGraph3D()(graphEl)
+    .backgroundColor("#0B1116")
+    .nodeLabel("label")
+    .nodeColor(function (n) { return COLORS[n.status] || "#56B6E6"; })
+    .nodeVal(function (n) { return n.type === "system" ? 8 : 2; })
+    .linkColor(function (l) { return l.kind === "contains" ? "#22303C" : "#5E7180"; })
+    .linkWidth(function (l) { return l.kind === "dep" ? 1 : 0.5; })
+    .linkOpacity(0.5)
+    .linkDirectionalParticles(function (l) { return l.kind === "dep" ? 2 : 0; })
+    .linkDirectionalParticleSpeed(0.006);
+
+  // Always-on node names rendered as DOM labels, projected from 3D each frame
+  // (works with the vendored UMD build — no extra libraries).
+  function rebuildLabels() {
+    labelsEl.innerHTML = "";
+    labelEls = {};
+    nodes.forEach(function (n) {
+      var d = document.createElement("div");
+      d.className = "node-label";
+      d.textContent = n.label;
+      labelsEl.appendChild(d);
+      labelEls[n.id] = d;
+    });
+  }
+  function positionLabels() {
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var d = labelEls[n.id];
+      if (!d || n.x == null) continue;
+      var c = Graph.graph2ScreenCoords(n.x, n.y, n.z);
+      var dy = n.type === "system" ? 14 : 9;
+      d.style.transform = "translate(-50%,-100%) translate(" + c.x + "px," + (c.y - dy) + "px)";
+      d.style.color = COLORS[n.status] || "#E7EEF4";
+      d.style.fontWeight = n.type === "system" ? "600" : "400";
+      d.style.fontSize = n.type === "system" ? "13px" : "11px";
+    }
+  }
+  (function frame() { positionLabels(); requestAnimationFrame(frame); })();
+
+  function fit() { Graph.width(graphEl.clientWidth).height(graphEl.clientHeight); }
+  fit();
+  window.addEventListener("resize", fit);
+
+  function load() {
+    fetch("/maps/graph.json").then(function (r) { return r.json(); }).then(function (d) {
+      nodes = d.nodes;
+      Graph.graphData(d);
+      rebuildLabels();
+    });
+  }
+  load();
+  setInterval(load, 15000);
+})();
+</script>
+{% endblock %}

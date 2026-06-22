@@ -35,6 +35,7 @@ dependencies = [
     "nh3>=0.3.5",
     "psycopg[binary]>=3.3.4",
     "pydantic-settings>=2.14.2",
+    "pyjwt[crypto]>=2.13.0",
     "python-multipart>=0.0.32",
     "slack-sdk>=3.42.0",
     "sqlalchemy>=2.0.51",

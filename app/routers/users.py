@@ -23,7 +23,6 @@ def users_page(
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
-    notice = request.session.pop("flash", None)
     users = list(db.scalars(select(User).order_by(User.id)))
     groups = list(db.scalars(select(Group).order_by(Group.id)))
     return templates.TemplateResponse(
@@ -35,7 +34,6 @@ def users_page(
             "groups": groups,
             "roles": list(Role),
             "effective_role": effective_role,
-            "notice": notice,
         },
     )
 

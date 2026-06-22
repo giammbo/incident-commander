@@ -6,27 +6,49 @@
   <meta name="color-scheme" content="dark">
   <title>{% block title %}Incident Commander{% endblock %}</title>
   <script src="/static/htmx.min.js" defer></script>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/app.css?v=3">
 </head>
 <body>
+  {# Flash messages are set via request.session["flash"] and popped here, so every full
+     page renders them once. HTMX partials don't extend base.html, so they never consume a flash. #}
+  {% set notice = request.session.pop("flash", None) %}
   {% if current_user %}
-  <header class="topbar">
-    <a class="brand" href="/"><span class="pulse" aria-hidden="true"></span>Incident&nbsp;Commander</a>
-    {% set _role = effective_role(current_user) %}
-    <nav class="nav">
-      <a href="/">Incidents</a>
-      {% if _role and _role.value in ("admin", "incident_commander") %}<a href="/connections">Connections</a>{% endif %}
-      {% if _role and _role.value == "admin" %}
+  {% set _role = effective_role(current_user) %}
+  {% set _is_admin = _role and _role.value == "admin" %}
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="pulse" aria-hidden="true"></span>Incident&nbsp;Commander</a>
+      <nav class="nav">
+        <a href="/">Incidents</a>
+        <a href="/systems">Systems</a>
+        <a href="/components">Components</a>
+        <a href="/maps">Maps</a>
+        <a href="/follow-ups">Follow-ups</a>
+      </nav>
+      {% if _is_admin %}
+      <nav class="nav nav-admin">
         <a href="/users">Users</a>
-        <a href="/settings">Settings</a>
+        <a href="/groups">Groups</a>
+      </nav>
       {% endif %}
-    </nav>
-    <span class="userbox">
-      <span class="who">{{ current_user.email }}</span>
-      <a href="/logout">Sign out</a>
-    </span>
-  </header>
+      <div class="sidebar-foot">
+        <div class="who">{{ current_user.email }}</div>
+        <a href="{{ '/settings' if _is_admin else '/account/password' }}">{{ 'Settings' if _is_admin else 'Account' }}</a>
+        <a href="/logout">Sign out</a>
+      </div>
+    </aside>
+    <main class="main">
+      {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% else %}
+  <main class="main main-plain">
+    {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
+    {% block content_plain %}{{ self.content() }}{% endblock %}
+  </main>
   {% endif %}
-  <main class="main">{% block content %}{% endblock %}</main>
 </body>
 </html>

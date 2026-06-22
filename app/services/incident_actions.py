@@ -9,6 +9,14 @@ from app.services import google, slack
 from app.settings_store import app_settings, google_settings
 
 
+def _scope_summary(incident: Incident) -> str:
+    if incident.system is None:
+        return ""
+    if incident.components:
+        return f"{incident.system.name}: " + ", ".join(c.name for c in incident.components)
+    return f"{incident.system.name}: whole system"
+
+
 def open_incident_slack(db: Session, incident: Incident, connection: SlackConnection) -> None:
     state = dict(incident.creation_state or {})
     template = app_settings(db).slack_channel_name_template
@@ -21,10 +29,12 @@ def open_incident_slack(db: Session, incident: Incident, connection: SlackConnec
         incident.slack_channel_name = ch["name"]
         incident.slack_channel_url = slack.channel_url(connection.team_id, ch["id"])
         sev = incident.severity_level.label if incident.severity_level else "—"
+        scope = _scope_summary(incident)
+        topic = f"{sev} · {incident.title}" + (f" · {scope}" if scope else "")
         slack.set_topic_purpose(
             token,
             channel_id=ch["id"],
-            topic=f"{sev} · {incident.title}",
+            topic=topic,
             purpose=f"Incident channel for: {incident.title}",
         )
         state["channel"] = "ok"
@@ -35,6 +45,8 @@ def open_incident_slack(db: Session, incident: Incident, connection: SlackConnec
         return
     try:
         text = f":rotating_light: *{sev}* incident opened: {incident.title}"
+        if scope:
+            text += f"\nScope: {scope}"
         if incident.meet_url:
             text += f"\nMeet: {incident.meet_url}"
         slack.post_message(
@@ -77,16 +89,21 @@ def update_incident_slack(db: Session, incident: Incident, connection: SlackConn
         return
     state = dict(incident.creation_state or {})
     sev = incident.severity_level.label if incident.severity_level else "—"
+    scope = _scope_summary(incident)
     try:
+        text = f":pencil2: Incident updated — *{sev}* · {incident.title}"
+        if scope:
+            text += f"\nScope: {scope}"
+        topic = f"{sev} · {incident.title}" + (f" · {scope}" if scope else "")
         slack.post_message(
             connection.bot_token,
             channel_id=incident.slack_channel_id,
-            text=f":pencil2: Incident updated — *{sev}* · {incident.title}",
+            text=text,
         )
         slack.set_topic_purpose(
             connection.bot_token,
             channel_id=incident.slack_channel_id,
-            topic=f"{sev} · {incident.title}",
+            topic=topic,
             purpose=f"Incident channel for: {incident.title}",
         )
         state["updated_announce"] = "ok"
@@ -109,5 +126,22 @@ def close_incident_slack(db: Session, incident: Incident, connection: SlackConne
         state["closed_announce"] = "ok"
     except Exception:  # noqa: BLE001
         state["closed_announce"] = "failed"
+    incident.creation_state = state
+    db.flush()
+
+
+def announce_meet_in_slack(db: Session, incident: Incident, connection: SlackConnection) -> None:
+    if not (incident.slack_channel_id and incident.meet_url):
+        return
+    state = dict(incident.creation_state or {})
+    try:
+        slack.post_message(
+            connection.bot_token,
+            channel_id=incident.slack_channel_id,
+            text=f":movie_camera: Meet added: {incident.meet_url}",
+        )
+        state["meet_announce"] = "ok"
+    except Exception:  # noqa: BLE001 — partial-failure-safe; surfaced via creation_state
+        state["meet_announce"] = "failed"
     incident.creation_state = state
     db.flush()

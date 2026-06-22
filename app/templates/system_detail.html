@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ s.name }}</h1></div>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+{% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
+<p class="muted">Owner: {{ s.owner_team.name if s.owner_team else '—' }}</p>
+
+<div class="card">
+  <h2>Components</h2>
+  {% if s.components %}
+  <ul>{% for c in s.components %}<li><strong>{{ c.name }}</strong>{% if c.depends_on %} <span class="muted">→ {{ c.depends_on | map(attribute='name') | join(', ') }}</span>{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">No components.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Depends on (other systems)</h2>
+  {% if can_manage %}
+  <form method="post" action="/systems/{{ s.id }}/deps">
+    <select name="depends_on_ids" multiple size="5" style="min-width:220px">
+      {% for o in other_systems %}<option value="{{ o.id }}"{% if o in s.depends_on %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
+    </select>
+    <div style="margin-top:10px"><button class="btn" type="submit">Save dependencies</button></div>
+  </form>
+  {% else %}
+  <p class="muted">{{ s.depends_on | map(attribute='name') | join(', ') or '—' }}</p>
+  {% endif %}
+</div>
+
+{% if can_manage %}
+<div class="card">
+  <h2>Edit system</h2>
+  <form method="post" action="/systems/{{ s.id }}/edit">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" value="{{ s.name }}" required></label>
+      <label class="field-block grow"><span>Description</span><input name="description" value="{{ s.description or '' }}"></label>
+    </div>
+    <label class="field-block"><span>Owner team</span>
+      <select name="owner_team_id">
+        <option value="">—</option>
+        {% for t in teams %}<option value="{{ t.id }}"{% if s and s.owner_team_id == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Save</button>
+  </form>
+</div>
+{% endif %}
+<a class="backlink" href="/systems">← All systems</a>
+{% endblock %}

@@ -1,0 +1,2 @@
+{% for c in components %}<option value="{{ c.id }}"{% if c.id in selected_ids %} selected{% endif %}>{{ c.name }}</option>
+{% endfor %}

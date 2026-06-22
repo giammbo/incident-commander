@@ -6,6 +6,7 @@ import app.services.incident_actions as actions
 from app.db import get_db
 from app.main import create_app
 from app.models import Incident, Role, SeverityLevel, SlackConnection
+from app.services import statuses
 from app.services.users import bootstrap_admin, create_user
 
 
@@ -17,6 +18,8 @@ def client(db_session):
 
 
 def _sev(db_session):
+    statuses.seed_status_levels(db_session)
+    db_session.flush()
     lvl = SeverityLevel(label="SEV1", color="#FF5D5D", rank=1, is_default=False)
     db_session.add(lvl)
     db_session.flush()

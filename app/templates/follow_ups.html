@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Follow-ups</h1>
+  <span class="stats"><b>{{ items | length }}</b> open</span>
+</div>
+{% if items %}
+<div class="incident-list">
+  {% for f in items %}
+  <div class="incident" style="--sev-color: var(--sev2)">
+    <span class="status" data-status="active"><span class="dot"></span>open</span>
+    <div class="inc-main">
+      <div class="inc-title">{{ f.title }}</div>
+      <div class="inc-meta">
+        <a class="chip" href="/incidents/{{ f.incident_id }}">{{ f.incident.title }}</a>
+        <span>{{ f.assignee.name if f.assignee else "unassigned" }}</span>
+        {% if f.due_on %}<span>· due {{ f.due_on.strftime("%b %d") }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No open follow-ups. 🎉</div>
+{% endif %}
+{% endblock %}

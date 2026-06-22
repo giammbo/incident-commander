@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Components</h1></div>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+
+<div class="card">
+  {% if components %}
+  <table>
+    <thead><tr><th>Name</th><th>System</th><th>Owner</th><th>Depends on</th><th></th></tr></thead>
+    <tbody>
+      {% for c in components %}
+      <tr>
+        <td>{{ c.name }}</td>
+        <td class="muted">{{ c.system.name }}</td>
+        <td class="muted">{{ c.owner_team.name if c.owner_team else '—' }}</td>
+        <td>
+          {% if can_manage %}
+          {% set same_system = components | selectattr('system_id', 'equalto', c.system_id) | rejectattr('id', 'equalto', c.id) | list %}
+          <form method="post" action="/components/{{ c.id }}/deps" style="display:inline-flex; gap:8px; align-items:center">
+            {% if same_system %}
+            <select name="depends_on_ids" multiple style="min-width:150px">
+              {% for o in same_system %}<option value="{{ o.id }}"{% if o in c.depends_on %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
+            </select>
+            <button class="btn btn-sm" type="submit">Save</button>
+            {% else %}<span class="muted">No other components in {{ c.system.name }}</span>{% endif %}
+          </form>
+          {% else %}{{ c.depends_on | map(attribute='name') | join(', ') or '—' }}{% endif %}
+        </td>
+        <td>
+          {% if can_manage %}
+          <details>
+            <summary class="btn btn-sm">Edit</summary>
+            <form method="post" action="/components/{{ c.id }}/edit" style="margin-top:8px">
+              <label class="field-block"><span>Name</span><input name="name" value="{{ c.name }}" required></label>
+              <label class="field-block"><span>Description</span><input name="description" value="{{ c.description or '' }}"></label>
+              <label class="field-block"><span>System</span>
+                <select name="system_id" required>{% for s in systems %}<option value="{{ s.id }}"{% if s.id == c.system_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select>
+              </label>
+              <label class="field-block"><span>Owner team</span>
+                <select name="owner_team_id">
+                  <option value="">—</option>
+                  {% for t in teams %}<option value="{{ t.id }}"{% if c and c.owner_team_id == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+                </select>
+              </label>
+              <p class="muted" style="font-size:12px;margin:0 0 8px">Moving to another system drops any dependency edges that would cross systems.</p>
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+          </details>
+          <form method="post" action="/components/{{ c.id }}/delete" style="display:inline">
+            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ c.name|tojson }} + "?")'>Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No components yet.</p>{% endif %}
+
+  {% if can_manage and systems %}
+  <h3 style="margin:16px 0 10px">Add component</h3>
+  <form method="post" action="/components">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120"></label>
+      <label class="field-block"><span>System</span>
+        <select name="system_id" required>{% for s in systems %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
+      </label>
+      <label class="field-block grow"><span>Description</span><input name="description" maxlength="500"></label>
+    </div>
+    <label class="field-block"><span>Owner team</span>
+      <select name="owner_team_id">
+        <option value="">—</option>
+        {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Add component</button>
+  </form>
+  {% elif can_manage %}<p class="muted" style="margin-top:14px">Create a system first.</p>{% endif %}
+</div>
+{% endblock %}

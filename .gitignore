@@ -1,6 +1,10 @@
 # Internal planning/design docs — never committed
 docs/
 
+# Local agent/session state — never committed
+.claude/
+.superpowers/
+
 # Python
 .venv/
 __pycache__/

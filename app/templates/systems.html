@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Systems</h1></div>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+
+<div class="card">
+  {% if systems %}
+  <table>
+    <thead><tr><th>Name</th><th>Owner</th><th>Components</th><th>Depends on</th><th></th></tr></thead>
+    <tbody>
+      {% for s in systems %}
+      <tr>
+        <td><a href="/systems/{{ s.id }}">{{ s.name }}</a></td>
+        <td class="muted">{{ s.owner_team.name if s.owner_team else '—' }}</td>
+        <td>{{ s.components | length }}</td>
+        <td class="muted">{{ s.depends_on | map(attribute='name') | join(', ') or '—' }}</td>
+        <td>
+          {% if can_manage %}
+          <form method="post" action="/systems/{{ s.id }}/delete" style="display:inline">
+            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ s.name|tojson }} + "?")'>Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No systems yet.</p>{% endif %}
+
+  {% if can_manage %}
+  <h3 style="margin:16px 0 10px">Add system</h3>
+  <form method="post" action="/systems">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120"></label>
+      <label class="field-block grow"><span>Description</span><input name="description" maxlength="500"></label>
+    </div>
+    <label class="field-block"><span>Owner team</span>
+      <select name="owner_team_id">
+        <option value="">—</option>
+        {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Add system</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

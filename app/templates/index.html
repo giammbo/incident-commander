@@ -1,33 +1,51 @@
 {% extends "base.html" %}
 {% block content %}
-{% set open_count = incidents | selectattr('status.value', 'equalto', 'open') | list | length %}
+{% set open_count = incidents | rejectattr('is_closed') | list | length %}
 <div class="page-head">
   <h1>Incidents</h1>
   <span class="stats"><b>{{ open_count }}</b> open <span class="sep">/</span> {{ incidents | length }} total</span>
 </div>
 
+{% set _role = effective_role(current_user) %}
+{% if _role and _role.value in ("admin", "incident_commander") %}
 <form class="create" hx-post="/incidents" hx-target="#incident-list" hx-swap="afterbegin">
   <input class="title-input" name="title" placeholder="What's happening?" required autocomplete="off">
-  <select name="severity_level_id" aria-label="Severity">
+  {% if incident_types %}
+  <select name="incident_type_id" aria-label="Type"
+          hx-get="/incidents/type-options" hx-target="#type-driven" hx-swap="innerHTML" hx-trigger="change">
+    {% for t in incident_types %}<option value="{{ t.id }}"{{ ' selected' if t.id == default_incident_type_id }}>{{ t.label }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <span id="type-driven">
+  <select id="sev-select" name="severity_level_id" aria-label="Severity">
     {% for lvl in severity_levels %}<option value="{{ lvl.id }}" {{ 'selected' if lvl.id == default_severity_level_id }}>{{ lvl.label }}</option>{% endfor %}
   </select>
+  <div id="custom-fields">{% include "partials/custom_field_inputs.html" %}</div>
+  </span>
   <textarea name="description" placeholder="Description (Markdown supported)"></textarea>
-  {% if services %}<select name="service_ids" multiple aria-label="Affected services">{% for s in services %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>{% endif %}
+  {% if systems %}
+  <select name="system_id" aria-label="System"
+          hx-get="/incidents/component-options" hx-target="#create-components"
+          hx-swap="innerHTML" hx-trigger="change">
+    <option value="">No system</option>
+    {% for s in systems %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+  </select>
+  <select id="create-components" name="component_ids" multiple aria-label="Affected components"></select>
+  {% endif %}
   <label class="check"><input type="checkbox" name="is_private" value="true"> Private</label>
   {% if slack_connections %}
-  <select name="slack_connection_id" aria-label="Slack workspace">
-    <option value="">No Slack</option>
+  <select name="slack_connection_id" aria-label="Chat room">
+    <option value="">No chat room</option>
     {% for c in slack_connections %}<option value="{{ c.id }}">{{ c.team_name or c.team_id }}</option>{% endfor %}
   </select>
   {% endif %}
-  {% if google_connections %}
-  <select name="google_connection_id" aria-label="Google Meet">
-    <option value="">No Meet</option>
-    {% for c in google_connections %}<option value="{{ c.id }}">{{ c.account_email }}</option>{% endfor %}
+  <select name="video" aria-label="Video call">
+    <option value="">No video call</option>
+    {% for c in google_connections %}<option value="meet:{{ c.id }}">Google Meet — {{ c.account_email }}</option>{% endfor %}
   </select>
-  {% endif %}
   <button class="btn btn-primary" type="submit">Declare incident</button>
 </form>
+{% endif %}
 
 <div class="incident-list" id="incident-list">
   {% for i in incidents %}{% include "partials/incident_row.html" %}{% endfor %}

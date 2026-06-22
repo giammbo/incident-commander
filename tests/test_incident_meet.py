@@ -47,7 +47,7 @@ def test_create_incident_makes_meet(client, db_session, monkeypatch):
         data={
             "title": "DB down",
             "severity_level_id": str(sev_id),
-            "google_connection_id": str(conn.id),
+            "video": f"meet:{conn.id}",
         },
         headers={"HX-Request": "true"},
     )
@@ -78,7 +78,7 @@ def test_meet_failure_is_graceful(client, db_session, monkeypatch):
     monkeypatch.setattr(actions.google, "create_meet", boom)
     r = client.post(
         "/incidents",
-        data={"title": "X", "severity_level_id": str(sev_id), "google_connection_id": str(conn.id)},
+        data={"title": "X", "severity_level_id": str(sev_id), "video": f"meet:{conn.id}"},
         headers={"HX-Request": "true"},
     )
     assert r.status_code == 200

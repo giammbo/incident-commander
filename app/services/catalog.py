@@ -5,7 +5,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Service, SeverityLevel
+from app.models import Component, SeverityLevel, System
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -71,23 +71,139 @@ def delete_severity_level(db: Session, level_id: int) -> None:
         db.flush()
 
 
-def create_service(
-    db: Session, *, name: str, description: str | None = None, created_by: int | None = None
-) -> Service:
-    svc = Service(name=name.strip(), description=description, created_by=created_by)
-    db.add(svc)
+def create_system(
+    db: Session,
+    *,
+    name: str,
+    description: str | None = None,
+    created_by: int | None = None,
+    owner_team_id: int | None = None,
+) -> System:
+    name = name.strip()
+    if not name:
+        raise ValueError("System name is required")
+    if db.scalar(select(System).where(System.name == name)):
+        raise ValueError(f"A system '{name}' already exists")
+    sysm = System(
+        name=name, description=description, created_by=created_by, owner_team_id=owner_team_id
+    )
+    db.add(sysm)
     db.flush()
-    return svc
+    return sysm
 
 
-def set_service_dependencies(db: Session, service: Service, depends_on_ids: list[int]) -> None:
-    ids = [i for i in depends_on_ids if i != service.id]
-    service.depends_on = list(db.scalars(select(Service).where(Service.id.in_(ids)))) if ids else []
+def update_system(
+    db: Session,
+    system: System,
+    *,
+    name: str,
+    description: str | None,
+    owner_team_id: int | None = None,
+) -> None:
+    name = name.strip()
+    if not name:
+        raise ValueError("System name is required")
+    clash = db.scalar(select(System).where(System.name == name, System.id != system.id))
+    if clash:
+        raise ValueError(f"A system '{name}' already exists")
+    system.name = name
+    system.description = description
+    system.owner_team_id = owner_team_id
     db.flush()
 
 
-def delete_service(db: Session, service_id: int) -> None:
-    svc = db.get(Service, service_id)
-    if svc:
-        db.delete(svc)
+def set_system_dependencies(db: Session, system: System, depends_on_ids: list[int]) -> None:
+    ids = [i for i in depends_on_ids if i != system.id]
+    system.depends_on = list(db.scalars(select(System).where(System.id.in_(ids)))) if ids else []
+    db.flush()
+
+
+def delete_system(db: Session, system_id: int) -> None:
+    from app.models import Incident
+
+    if db.scalar(select(Incident).where(Incident.system_id == system_id)):
+        raise ValueError("This system is referenced by an incident; reassign it first")
+    if db.scalar(select(Component).where(Component.system_id == system_id)):
+        raise ValueError("This system still has components; reassign or delete them first")
+    sysm = db.get(System, system_id)
+    if sysm:
+        db.delete(sysm)
+        db.flush()
+
+
+def create_component(
+    db: Session,
+    *,
+    name: str,
+    system_id: int,
+    description: str | None = None,
+    created_by: int | None = None,
+    owner_team_id: int | None = None,
+) -> Component:
+    name = name.strip()
+    if not name:
+        raise ValueError("Component name is required")
+    if db.get(System, system_id) is None:
+        raise ValueError("Unknown system")
+    if db.scalar(select(Component).where(Component.name == name)):
+        raise ValueError(f"A component '{name}' already exists")
+    comp = Component(
+        name=name,
+        description=description,
+        system_id=system_id,
+        created_by=created_by,
+        owner_team_id=owner_team_id,
+    )
+    db.add(comp)
+    db.flush()
+    return comp
+
+
+def update_component(
+    db: Session,
+    component: Component,
+    *,
+    name: str,
+    description: str | None,
+    system_id: int,
+    owner_team_id: int | None = None,
+) -> None:
+    name = name.strip()
+    if not name:
+        raise ValueError("Component name is required")
+    if db.get(System, system_id) is None:
+        raise ValueError("Unknown system")
+    clash = db.scalar(select(Component).where(Component.name == name, Component.id != component.id))
+    if clash:
+        raise ValueError(f"A component '{name}' already exists")
+    moving = system_id != component.system_id
+    component.name = name
+    component.description = description
+    component.system_id = system_id
+    component.owner_team_id = owner_team_id
+    if moving:
+        # Drop dependency edges (both directions) that would now be cross-system.
+        component.depends_on = [d for d in component.depends_on if d.system_id == system_id]
+        for other in db.scalars(select(Component).where(Component.system_id != system_id)):
+            if component in other.depends_on:
+                other.depends_on = [d for d in other.depends_on if d.id != component.id]
+    db.flush()
+
+
+def set_component_dependencies(
+    db: Session, component: Component, depends_on_ids: list[int]
+) -> None:
+    ids = [i for i in depends_on_ids if i != component.id]
+    targets = list(db.scalars(select(Component).where(Component.id.in_(ids)))) if ids else []
+    for t in targets:
+        if t.system_id != component.system_id:
+            raise ValueError("Components can only depend on components in the same system")
+    component.depends_on = targets
+    db.flush()
+
+
+def delete_component(db: Session, component_id: int) -> None:
+    comp = db.get(Component, component_id)
+    if comp:
+        db.delete(comp)
         db.flush()

@@ -11,11 +11,14 @@ from app.config import Settings, get_settings
 from app.crypto import build_fernet, set_fernet
 from app.routers import account as account_router
 from app.routers import auth as auth_router
+from app.routers import catalog as catalog_router
 from app.routers import connections as connections_router
-from app.routers import google_auth as google_auth_router
+from app.routers import followups as followups_router
 from app.routers import groups as groups_router
 from app.routers import incidents as incidents_router
 from app.routers import invites as invites_router
+from app.routers import maps as maps_router
+from app.routers import oidc_auth as oidc_auth_router
 from app.routers import settings as settings_router
 from app.routers import users as users_router
 from app.services.users import bootstrap_admin
@@ -47,8 +50,14 @@ def create_app() -> FastAPI:
         try:
             run_startup_bootstrap(db, settings)
             from app.services.catalog import seed_severity_levels
+            from app.services.incident_types import seed_incident_types
+            from app.services.roles import seed_incident_role_types
+            from app.services.statuses import seed_status_levels
 
             seed_severity_levels(db)
+            seed_status_levels(db)
+            seed_incident_role_types(db)
+            seed_incident_types(db)
             db.commit()
         finally:
             db_gen.close()
@@ -70,14 +79,17 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(auth_router.router)
-    app.include_router(google_auth_router.router)
+    app.include_router(oidc_auth_router.router)
     app.include_router(account_router.router)
     app.include_router(connections_router.router)
+    app.include_router(catalog_router.router)
     app.include_router(incidents_router.router)
     app.include_router(users_router.router)
     app.include_router(groups_router.router)
     app.include_router(settings_router.router)
     app.include_router(invites_router.router)
+    app.include_router(maps_router.router)
+    app.include_router(followups_router.router)
     return app
 
 
