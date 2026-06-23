@@ -311,6 +311,10 @@ class Incident(Base):
     custom_values: Mapped[list[IncidentCustomFieldValue]] = relationship(
         cascade="all, delete-orphan"
     )
+    postmortem: Mapped[Postmortem | None] = relationship(
+        cascade="all, delete-orphan", uselist=False
+    )
+    alerts: Mapped[list[Alert]] = relationship(back_populates="incident")
 
     @property
     def is_closed(self) -> bool:
@@ -456,3 +460,69 @@ class IncidentCustomFieldValue(Base):
     value: Mapped[str] = mapped_column(Text)
     field: Mapped[CustomFieldDef] = relationship()
     __table_args__ = (UniqueConstraint("incident_id", "field_id", name="uq_incident_field"),)
+
+
+class Postmortem(Base):
+    __tablename__ = "postmortems"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    incident_id: Mapped[int] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), unique=True
+    )
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class InboundIntegration(Base):
+    __tablename__ = "inbound_integrations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(20))  # sns | alertmanager | generic
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    integration_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inbound_integrations.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(20))
+    dedup_key: Mapped[str] = mapped_column(String(500), index=True)
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    severity_raw: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="firing", index=True)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    links: Mapped[list] = mapped_column(JSONB, default=list)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    incident_id: Mapped[int | None] = mapped_column(
+        ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    integration: Mapped[InboundIntegration | None] = relationship()
+    incident: Mapped[Incident | None] = relationship(back_populates="alerts")
+    __table_args__ = (UniqueConstraint("integration_id", "dedup_key", name="uq_alert_dedup"),)
+
+
+class WorkflowRule(Base):
+    __tablename__ = "workflow_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    trigger: Mapped[str] = mapped_column(String(40), index=True)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    actions: Mapped[list] = mapped_column(JSONB, default=list)
+    rank: Mapped[int] = mapped_column(Integer, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

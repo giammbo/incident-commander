@@ -398,6 +398,26 @@
 </div>
 
 <div class="card">
+  <h2>Inbound integrations</h2>
+  <form method="post" action="/settings/integrations" class="form-row" style="margin-bottom:12px">
+    <input class="grow" name="name" placeholder="Name (e.g. prod CloudWatch)" required>
+    <select name="kind"><option value="sns">AWS SNS (CloudWatch)</option><option value="alertmanager">Prometheus Alertmanager</option><option value="generic">Generic JSON</option></select>
+    <button class="btn btn-sm" type="submit">Add</button>
+  </form>
+  {% for integ in integrations %}
+  <div class="form-row" style="border-top:1px solid var(--line-soft); padding-top:10px">
+    <span class="grow"><strong>{{ integ.name }}</strong> <span class="role">{{ integ.kind }}</span><br>
+      <code class="muted" style="font-size:11.5px">{{ base_url }}/ingest/{{ integ.token }}</code></span>
+    <form method="post" action="/settings/integrations/{{ integ.id }}/delete" onsubmit="return confirm('Delete this integration?')">
+      <button class="chip" type="submit">delete</button>
+    </form>
+  </div>
+  {% else %}
+  <span class="muted">No inbound integrations yet.</span>
+  {% endfor %}
+</div>
+
+<div class="card">
   <h2>Incident roles</h2>
   {% if incident_role_types %}
   <table style="width:100%; border-collapse:collapse; margin-bottom:16px">

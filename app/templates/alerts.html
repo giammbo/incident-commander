@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Alerts</h1>
+  <span class="range">
+    <a href="/alerts"{% if not filter_status %} class="active"{% endif %}>Firing &amp; open</a>
+    <a href="/alerts?status=firing"{% if filter_status == 'firing' %} class="active"{% endif %}>Firing</a>
+    <a href="/alerts?status=resolved"{% if filter_status == 'resolved' %} class="active"{% endif %}>Resolved</a>
+  </span>
+</div>
+
+<div class="incident-list">
+  {% for a in alerts %}
+  <div class="tl-entry" data-kind="{{ 'update' if a.status == 'firing' else 'closed' }}"
+       style="background:var(--surface); border:1px solid var(--line); border-left-width:3px;
+              border-radius:var(--r); padding:14px 16px; margin-bottom:10px">
+    <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap">
+      <span class="status" data-status="{{ 'active' if a.status == 'firing' else 'closed' }}"><span class="dot"></span>{{ a.status }}</span>
+      <strong>{{ a.title }}</strong>
+      {% if a.severity_raw %}<span class="chip">{{ a.severity_raw }}</span>{% endif %}
+      {% if a.incident_id %}<a class="chip" href="/incidents/{{ a.incident_id }}">incident #{{ a.incident_id }}</a>{% endif %}
+    </div>
+    <div class="inc-meta" style="margin-top:5px">
+      <span>{{ a.source }}</span>
+      <span>· seen {{ a.occurrence_count }}×</span>
+      <span>· {{ a.last_seen_at.strftime("%b %d · %H:%M") if a.last_seen_at else "" }}</span>
+      {% for lk in a.links %}{% if lk.url and (lk.url.startswith('http://') or lk.url.startswith('https://')) %}<a class="chip" href="{{ lk.url }}" rel="noopener noreferrer">{{ lk.label }}</a>{% endif %}{% endfor %}
+    </div>
+    {% if not a.incident_id %}
+    <div style="margin-top:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+      <form method="post" action="/alerts/{{ a.id }}/declare" style="display:inline">
+        <button class="btn btn-primary btn-sm" type="submit">Declare incident</button>
+      </form>
+      <form method="post" action="/alerts/{{ a.id }}/attach" style="display:inline-flex; gap:6px; align-items:center">
+        <select name="incident_id"><option value="">attach to…</option>{% for inc in open_incidents %}<option value="{{ inc.id }}">#{{ inc.id }} {{ inc.title }}</option>{% endfor %}</select>
+        <button class="btn btn-sm" type="submit">Attach</button>
+      </form>
+      {% if a.status == 'firing' %}
+      <form method="post" action="/alerts/{{ a.id }}/resolve" style="display:inline"><button class="chip" type="submit">resolve</button></form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="empty">No alerts. Nothing is firing.</div>
+  {% endfor %}
+</div>
+{% endblock %}

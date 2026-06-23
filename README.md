@@ -11,8 +11,10 @@ response. Built to run on your own infrastructure, behind your own SSO.
 
 > **Status — production-shaped and running today.** Local auth + RBAC + generic OIDC SSO, the full
 > configurable incident lifecycle (severities, statuses, types, roles, timeline, follow-ups, custom
-> fields), a systems/components catalogue with team ownership and a live 3D dependency map, and the
-> optional Slack / Google Meet / outgoing-webhook / SMTP integrations are all in place.
+> fields), **postmortems**, **insights/analytics**, **stakeholder updates**, **inbound alerting**
+> (AWS CloudWatch/SNS, Prometheus Alertmanager, generic webhook), an **automation/workflow engine**
+> (trigger → conditions → actions), a systems/components catalogue with team ownership and a live 3D
+> dependency map, and the optional Slack / Google Meet / outgoing-webhook / SMTP integrations are all in place.
 
 ## Features
 
@@ -26,6 +28,22 @@ response. Built to run on your own infrastructure, behind your own SSO.
 - **Timeline** — an automatic chronological log (opened, status change, reopened, closed, role change, Slack/video added) plus **Markdown notes** you can pin.
 - **Follow-ups / action items** — create, assign (with a due date), and complete/cancel action items per incident; a global **Follow-ups** page surfaces all open items across incidents.
 - **Custom fields** — admin-defined fields (text, long text, single/multi-select, number, checkbox, date), scoped per incident type, shown on the declare form (type-dependent) and the detail.
+- **Stakeholder updates** — post a Markdown broadcast (optionally with a status change) that lands on the timeline, posts to the incident's Slack channel, and fires the outgoing webhooks with an `update` event.
+- **Postmortems** — a single Markdown document per incident, pre-assembled from the timeline + follow-ups, then editable.
+
+### Insights
+
+- **Dashboard + breakdowns** — totals (open/closed), **MTTR**, open follow-ups, and breakdowns by severity / type / status / system / team over a selectable window (30d / 90d / all), with semantic bar colours.
+
+### Inbound alerting
+
+- **Ingest alerts** from your monitoring into a deduplicated **Alerts inbox** via a token-authenticated endpoint, then promote an alert to a new incident or attach it to an existing one.
+- **Adapters** — **AWS SNS** (CloudWatch alarms natively + EventBridge-via-SNS best-effort, with AWS **signature verification**), **Prometheus Alertmanager** (the kube-prometheus webhook), and a **generic JSON** mapper. Alerts dedupe per source key and track a firing↔resolved lifecycle.
+
+### Automation / workflows
+
+- **Trigger → conditions → actions rules** (admin-defined) that run automatically on `incident.opened`, `incident.status_changed`, and `alert.received`. Conditions are AND-matched equalities on a fixed field set (severity / type / privacy / system for incidents; source / severity / status for alerts).
+- **Actions** reuse the app's own side-effects: open a Slack channel, assign a role, set status, post a stakeholder update, create a follow-up — and, for inbound alerts, **auto-create an incident** (linking the alert, then running the incident-opened rules). Execution is inline, partial-failure-safe, and recorded on the timeline.
 
 ### Catalogue & map
 
@@ -37,7 +55,8 @@ response. Built to run on your own infrastructure, behind your own SSO.
 
 - **Slack** — connect workspaces via OAuth; declaring an incident auto-opens a channel and posts opened/updated/closed messages.
 - **Video** — pluggable video providers (Google Meet bridge auto-created per incident) via a small provider abstraction.
-- **Outgoing webhooks** — fire on opened/updated/closed to **Slack, Microsoft Teams, Discord, or a generic JSON** endpoint.
+- **Outgoing webhooks** — fire on opened/updated/closed/update to **Slack, Microsoft Teams, Discord, or a generic JSON** endpoint.
+- **Inbound alerting** — receive alerts from AWS SNS (CloudWatch), Prometheus Alertmanager, or any system via a generic JSON endpoint (see [Inbound alerting](#inbound-alerting) above).
 
 ### Platform
 
@@ -45,7 +64,7 @@ response. Built to run on your own infrastructure, behind your own SSO.
 - **Auth & RBAC** — local accounts (argon2) **and** generic **OIDC SSO** (Azure Entra / Okta / Google / any OIDC IdP) with domain gating and a local break-glass. Three group-based roles: Admin, Incident Commander, Read-only.
 - **User & group management** — admin UI to invite users (email when SMTP is set, or a generated temp password), organize groups, assign roles.
 - **Encrypted settings** — every integration credential/token is encrypted at rest (Fernet); secrets are never rendered in the UI or written to logs.
-- **The UI** — a focused dark interface (incident.io-inspired): the **Flamingo** accent marks live incidents and primary actions, severity stays a semantic colour, Markdown is rendered safely (sanitized with `nh3`). Left-sidebar nav: Incidents · Systems · Components · Maps · Follow-ups (+ admin Users / Groups), with Settings/Account at the bottom.
+- **The UI** — a focused dark interface (incident.io-inspired): the **Flamingo** accent marks live incidents and primary actions, severity stays a semantic colour, Markdown is rendered safely (sanitized with `nh3`). Left-sidebar nav: Incidents · Systems · Components · Maps · Follow-ups · Alerts · Insights (+ admin Users / Groups / Automations), with the active page highlighted and Settings/Account at the bottom.
 
 All integrations are partial-failure-safe: an incident is always created as a record, integrations are added only when you select a connection, and a failing integration is surfaced on the incident — never a 500.
 
@@ -146,15 +165,23 @@ bootstrap secrets come from the environment. Markdown is rendered with `markdown
 
 - **Core platform** — local auth + group RBAC, generic OIDC SSO, SMTP email invites ✅
 - **Integrations** — Slack channels, Google Meet bridge (via a video-provider abstraction), outgoing webhooks (Slack/Teams/Discord/generic) ✅
-- **Incident process** — configurable severities, statuses (with categories), incident types, roles & assignees, timeline (auto events + notes), follow-ups / action items, custom fields ✅
+- **Incident process** — configurable severities, statuses (with categories), incident types, roles & assignees, timeline (auto events + notes), follow-ups / action items, custom fields, stakeholder updates, postmortems ✅
 - **Catalogue** — systems & components with a two-tier dependency graph, team ownership, and a live 3D blast-radius map ✅
-- **Next** — postmortems (assembled from timeline + follow-ups), insights/analytics (MTTR/MTTA, trends), public status page, an automation/workflow engine, inbound alerting, and on-call/paging.
+- **Insights & alerting** — insights/analytics (MTTR, breakdowns, trends) and inbound alerting (AWS CloudWatch/SNS, Prometheus Alertmanager, generic) into an Alerts inbox with promotion to incidents ✅
+- **Automation** — a trigger → conditions → actions workflow engine (incident-opened / status-changed / alert-received), with alert→incident auto-creation ✅
+- **Next** — public status page, on-call/paging, a native Slack/Teams bot, and a public API.
 
 ## Security
 
 Integration credentials and tokens are encrypted at rest (Fernet), passwords are hashed with
-argon2, and sessions use a signed cookie. Please report vulnerabilities privately — see
+argon2, and sessions use a signed `SameSite=Lax` cookie. State-changing requests are protected
+against **CSRF** by an Origin/Referer check (the inbound `/ingest` endpoint is exempt — it is
+authenticated by its own secret token). Please report vulnerabilities privately — see
 [SECURITY.md](SECURITY.md). Run behind HTTPS with `SESSION_HTTPS_ONLY=true` in production.
+
+**Behind a reverse proxy:** set `BASE_URL` to the public origin **and** forward the original `Host`
+header, so the CSRF check's allowed-origin set matches the browser's real origin. For the public
+`/ingest` endpoint, also consider a proxy-level rate limit (the app caps each request body at 256 KB).
 
 ## Contributing
 

@@ -1,0 +1,17 @@
+{% if action_type == "open_slack_channel" %}
+  <span class="muted">Opens a Slack channel (default workspace) if the incident has none.</span>
+{% elif action_type == "set_status" %}
+  <select name="ap_status">{% for s in statuses %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}</select>
+{% elif action_type == "assign_role" %}
+  <select name="ap_role">{% for r in role_types %}<option value="{{ r.id }}">{{ r.label }}</option>{% endfor %}</select>
+  <select name="ap_users" multiple size="3">{% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}</select>
+{% elif action_type == "post_update" %}
+  <input name="ap_message" placeholder="Update message (Markdown)" style="width:100%" required>
+{% elif action_type == "create_followup" %}
+  <input name="ap_title" placeholder="Follow-up title" required>
+  <select name="ap_assignee"><option value="">Unassigned</option>{% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}</select>
+{% elif action_type == "create_incident" %}
+  <select name="ap_severity"><option value="">Default severity</option>{% for s in severities %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}</select>
+  <select name="ap_type"><option value="">No type</option>{% for t in incident_types %}<option value="{{ t.id }}">{{ t.label }}</option>{% endfor %}</select>
+  <label class="check"><input type="checkbox" name="ap_private" value="true"> Private</label>
+{% endif %}

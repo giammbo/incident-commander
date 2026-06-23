@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Automations — Incident Commander{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Automations</h1></div>
+
+<div class="incident-list" style="margin-bottom:24px">
+  {% for r in rules %}
+  <div class="incident" data-status="{{ 'active' if r.enabled else 'closed' }}" style="--sev-color: var(--ink-3)">
+    <span class="role"{% if not r.enabled %} style="opacity:.6"{% endif %}>{{ r.trigger }}</span>
+    <div class="inc-main"><div class="inc-title">{{ r.name }}</div>
+      <div class="inc-meta"><span>{{ r.conditions | length }} condition(s)</span><span>· {{ r.actions | length }} action(s)</span></div></div>
+    <span class="row-actions">
+      <form method="post" action="/automations/{{ r.id }}/toggle" style="display:inline"><button class="chip" type="submit">{{ "disable" if r.enabled else "enable" }}</button></form>
+      <form method="post" action="/automations/{{ r.id }}/delete" style="display:inline" onsubmit="return confirm('Delete this rule?')"><button class="chip" type="submit">delete</button></form>
+    </span>
+  </div>
+  {% else %}<div class="empty">No automation rules yet.</div>{% endfor %}
+</div>
+
+<div class="card">
+  <h2>New rule</h2>
+  <form method="post" action="/automations">
+    <div class="form-row" style="margin-bottom:10px">
+      <input class="grow" name="name" placeholder="Rule name" required>
+      <select name="trigger">{% for t in trigger_fields %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+    </div>
+    <div class="field-block"><span>Conditions (all must match)</span>
+      {% for i in range(3) %}
+      <div class="form-row" style="margin-bottom:6px">
+        <input name="cond_field" placeholder="field (e.g. severity / severity_raw)">
+        <select name="cond_op"><option value="equals">equals</option><option value="in">in</option></select>
+        <input name="cond_value" placeholder="value (id or text; in = comma list)">
+      </div>
+      {% endfor %}
+    </div>
+    <div class="field-block"><span>Action</span>
+      <select name="action_type" hx-get="/automations/action-params" hx-target="#action-params" hx-swap="innerHTML" hx-trigger="change" hx-include="this">
+        <option value="">— pick an action —</option>
+        <option value="open_slack_channel">open_slack_channel</option>
+        <option value="assign_role">assign_role</option>
+        <option value="set_status">set_status</option>
+        <option value="post_update">post_update</option>
+        <option value="create_followup">create_followup</option>
+        <option value="create_incident">create_incident</option>
+      </select>
+      <div id="action-params" style="margin-top:8px"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" type="submit">Create rule</button>
+  </form>
+</div>
+{% endblock %}

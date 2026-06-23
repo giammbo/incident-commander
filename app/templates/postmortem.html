@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+{% set _role = effective_role(current_user) %}
+{% set _can_manage = _role and _role.value in ("admin", "incident_commander") %}
+<div class="page-head">
+  <h1>Postmortem</h1>
+  <span class="stats">{{ i.title }}</span>
+</div>
+{% if postmortem %}
+<div class="panel">
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px">
+    <a class="btn btn-sm" href="/incidents/{{ i.id }}/postmortem.md">Download .md</a>
+    {% if _can_manage %}
+    <form method="post" action="/incidents/{{ i.id }}/postmortem/regenerate" style="display:inline"
+          onsubmit="return confirm('Overwrite the postmortem from the current incident data?')">
+      <button class="btn btn-sm" type="submit">Regenerate from template</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-sm btn-ghost" href="/incidents/{{ i.id }}">← Incident</a>
+  </div>
+  <div class="panel-desc">{{ postmortem.body | markdown | safe }}</div>
+  {% if _can_manage %}
+  <details style="margin-top:1rem"><summary style="cursor:pointer;font-weight:600">Edit</summary>
+    <form method="post" action="/incidents/{{ i.id }}/postmortem" style="margin-top:.75rem">
+      <textarea name="body" rows="24" style="width:100%; font-family:var(--font-mono)">{{ postmortem.body }}</textarea>
+      <div style="margin-top:8px"><button class="btn btn-primary" type="submit">Save</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% else %}
+<div class="empty">
+  No postmortem yet.
+  {% if _can_manage %}
+  <form method="post" action="/incidents/{{ i.id }}/postmortem/generate" style="margin-top:12px">
+    <button class="btn btn-primary" type="submit">Generate postmortem</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+<a class="backlink" href="/incidents/{{ i.id }}">← Back to incident</a>
+{% endblock %}

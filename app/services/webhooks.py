@@ -16,7 +16,15 @@ def incident_message(incident, event: str) -> str:
     return f":pencil2: Incident updated — *{sev}* · {incident.title}"
 
 
-def build_payload(fmt: WebhookFormat, *, text: str, incident, event: str, url: str | None) -> dict:
+def build_payload(
+    fmt: WebhookFormat,
+    *,
+    text: str,
+    incident,
+    event: str,
+    url: str | None,
+    message: str | None = None,
+) -> dict:
     if fmt == WebhookFormat.slack:
         return {"text": text}
     if fmt == WebhookFormat.discord:
@@ -37,23 +45,31 @@ def build_payload(fmt: WebhookFormat, *, text: str, incident, event: str, url: s
             "status": incident.status.category.value if incident.status else None,
             "url": url,
         },
+        "message": message,
     }
 
 
-def notify(db: Session, incident, event: str, *, base_url: str, post=None) -> None:
+def notify(
+    db: Session, incident, event: str, *, base_url: str, post=None, message: str | None = None
+) -> None:
     post = post or httpx.post
     try:
         hooks = list(db.scalars(select(Webhook).where(Webhook.enabled.is_(True))))
         if not hooks:
             return
         url = f"{base_url.rstrip('/')}/incidents/{incident.id}"
-        text = incident_message(incident, event)
+        text = message or incident_message(incident, event)
         for hook in hooks:
             try:
                 post(
                     hook.url,
                     json=build_payload(
-                        hook.format, text=text, incident=incident, event=event, url=url
+                        hook.format,
+                        text=text,
+                        incident=incident,
+                        event=event,
+                        url=url,
+                        message=message,
                     ),
                     timeout=5,
                 )

@@ -66,3 +66,28 @@ def test_notify_posts_to_enabled_only_and_is_partial_failure_safe(db_session):
     assert "https://hooks/ok1" in urls and "https://hooks/off" not in urls  # disabled skipped
     # the failing 'boom' webhook didn't stop 'ok1'
     assert any(j == {"text": wh.incident_message(inc, "opened")} for _, j in posted)
+
+
+def test_notify_includes_stakeholder_message(db_session):
+    from app.models import Webhook
+
+    db_session.add_all(
+        [
+            Webhook(name="s", url="https://hooks/s", format=WebhookFormat.slack, enabled=True),
+            Webhook(name="g", url="https://hooks/g", format=WebhookFormat.generic, enabled=True),
+        ]
+    )
+    db_session.flush()
+    posted = []
+    inc = _inc()
+    wh.notify(
+        db_session,
+        inc,
+        "update",
+        base_url="https://app",
+        message="Mitigation deployed",
+        post=lambda url, json=None, timeout=None: posted.append((url, json)),
+    )
+    by_url = dict(posted)
+    assert by_url["https://hooks/s"] == {"text": "Mitigation deployed"}
+    assert by_url["https://hooks/g"]["message"] == "Mitigation deployed"

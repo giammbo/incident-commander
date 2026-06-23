@@ -208,7 +208,8 @@ label { color: var(--ink-2); }
 }
 .incident:hover { background: #1b2737; transform: translateX(2px); }
 .incident[data-status="active"] { box-shadow: 0 0 0 1px var(--accent-line), 0 0 26px -10px var(--accent); }
-.incident[data-status="closed"] { opacity: .55; }
+/* Closed reads as resolved: dim the row and neutralize the urgency rail. */
+.incident[data-status="closed"] { opacity: .55; border-left-color: var(--ink-3); }
 @keyframes rowin { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 .sev {
@@ -359,3 +360,65 @@ select[multiple] option:checked { background: var(--accent-soft); color: #fff; }
 .map-legend { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono);
   font-size: 12px; color: var(--ink-3); }
 .map-legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+/* ---------- Insights bars ---------- */
+.bar { display:inline-block; height:10px; background:var(--surface-2); border:1px solid var(--line); border-radius:999px; overflow:hidden; }
+.bar-fill { display:block; height:100%; background:var(--accent); border-radius:999px; }
+
+/* Segmented range toggle (Insights) */
+.range { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); }
+.range a { padding: 3px 12px; border-radius: 999px; font-family: var(--font-mono);
+  font-size: 11.5px; color: var(--ink-3); }
+.range a:hover { color: var(--ink); }
+.range a.active { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- Detail page: sections, roles, respond ---------- */
+/* Turn the one tall panel into legible sections with consistent headers. */
+.section { border-top: 1px solid var(--line-soft); margin-top: 22px; padding-top: 18px; }
+.section-title {
+  display: flex; align-items: baseline; gap: 8px; margin: 0 0 13px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: .07em; text-transform: uppercase; color: var(--ink-3);
+}
+.section-title .count { color: var(--ink-2); }
+
+/* Roles: compact one-line rows; the assignment editor hides in a disclosure. */
+.role-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+.role-row .role-name { min-width: 132px; color: var(--ink-2); }
+.role-edit { margin-top: 5px; }
+.role-edit > summary {
+  cursor: pointer; color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 11.5px; list-style: none; display: inline-block;
+}
+.role-edit > summary:hover { color: var(--accent); }
+.role-edit > summary::-webkit-details-marker { display: none; }
+.role-edit > summary::before { content: "✎ "; }
+
+/* Respond — the primary action zone, the one place we spend Flamingo. */
+.respond {
+  margin-top: 26px; padding: 18px 18px 20px;
+  border: 1px solid var(--line); border-top: 2px solid var(--accent);
+  border-radius: var(--r);
+  background: color-mix(in oklab, var(--accent) 5%, var(--surface));
+}
+.respond .respond-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.respond textarea { margin-top: 6px; }
+
+/* Closed incidents read as resolved — neutralize the urgency rail on the panel. */
+.panel[data-closed] { border-left-color: var(--line); }
+
+/* ---------- Timeline / follow-up entries (typed rails) ---------- */
+/* Rail color encodes the event kind so the incident history scans by type. */
+.tl-entry { border-left: 2px solid var(--line); padding: 6px 0 6px 13px; margin-bottom: 8px; }
+.tl-entry[data-kind="update"]                                   { border-left-color: var(--accent); }
+.tl-entry[data-kind="note"]                                     { border-left-color: var(--ink-3); }
+.tl-entry[data-kind="status_changed"],
+.tl-entry[data-kind="opened"],
+.tl-entry[data-kind="reopened"]                                 { border-left-color: var(--sev3); }
+.tl-entry[data-kind="closed"]                                   { border-left-color: var(--ink-3); }
+.tl-entry[data-kind="slack_opened"],
+.tl-entry[data-kind="video_added"]                              { border-left-color: var(--ok); }
+.tl-entry[data-kind="followup"],
+.tl-entry[data-kind="roles_changed"]                            { border-left-color: var(--sev2); }
+.tl-done { opacity: .6; }

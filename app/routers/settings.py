@@ -42,6 +42,9 @@ def settings_page(
     from app.services.teams import list_teams
 
     teams = list_teams(db)
+    from app.models import InboundIntegration
+
+    integrations = list(db.scalars(select(InboundIntegration).order_by(InboundIntegration.id)))
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -70,6 +73,7 @@ def settings_page(
             "custom_field_defs": custom_field_defs,
             "field_types": FIELD_TYPES,
             "teams": teams,
+            "integrations": integrations,
         },
     )
 
@@ -243,14 +247,19 @@ def settings_severity_delete(
 
 @router.post("/settings/severity/{level_id}/default")
 def settings_severity_default(
+    request: Request,
     level_id: int,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
     from app.services.catalog import set_default_severity_level
 
-    set_default_severity_level(db, level_id)
-    db.commit()
+    try:
+        set_default_severity_level(db, level_id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        request.session["flash"] = str(exc)
     return RedirectResponse("/settings", status_code=303)
 
 
@@ -295,14 +304,19 @@ def settings_statuses_delete(
 
 @router.post("/settings/statuses/{level_id}/default")
 def settings_statuses_default(
+    request: Request,
     level_id: int,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
     from app.services.statuses import set_default_status_level
 
-    set_default_status_level(db, level_id)
-    db.commit()
+    try:
+        set_default_status_level(db, level_id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        request.session["flash"] = str(exc)
     return RedirectResponse("/settings", status_code=303)
 
 
@@ -355,14 +369,19 @@ def settings_incident_types_delete(
 
 @router.post("/settings/incident-types/{type_id}/default")
 def settings_incident_types_default(
+    request: Request,
     type_id: int,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
     from app.services.incident_types import set_default_incident_type
 
-    set_default_incident_type(db, type_id)
-    db.commit()
+    try:
+        set_default_incident_type(db, type_id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        request.session["flash"] = str(exc)
     return RedirectResponse("/settings", status_code=303)
 
 
@@ -526,4 +545,41 @@ def settings_team_delete(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/integrations")
+def settings_integrations_create(
+    request: Request,
+    name: str = Form(...),
+    kind: str = Form(...),
+    user: User = Depends(require_role(Role.admin)),
+    db: Session = Depends(get_db),
+):
+    import secrets
+
+    from app.models import InboundIntegration
+
+    if kind not in ("sns", "alertmanager", "generic"):
+        request.session["flash"] = "Unknown integration kind."
+        return RedirectResponse("/settings", status_code=303)
+    db.add(InboundIntegration(name=name, kind=kind, token=secrets.token_urlsafe(32)))
+    db.commit()
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/integrations/{integration_id}/delete")
+def settings_integrations_delete(
+    integration_id: int,
+    user: User = Depends(require_role(Role.admin)),
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import select
+
+    from app.models import InboundIntegration
+
+    integ = db.scalar(select(InboundIntegration).where(InboundIntegration.id == integration_id))
+    if integ is not None:
+        db.delete(integ)
+        db.commit()
     return RedirectResponse("/settings", status_code=303)

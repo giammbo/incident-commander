@@ -3,7 +3,7 @@
 {% set _role = effective_role(current_user) %}
 {% set _can_manage = _role and _role.value in ("admin", "incident_commander") %}
 {% set _is_open = not i.is_closed %}
-<div class="panel" style="--sev-color: {{ i.severity_level.color if i.severity_level else '#5E7180' }}">
+<div class="panel"{% if i.is_closed %} data-closed{% endif %} style="--sev-color: {{ i.severity_level.color if i.severity_level else '#5E7180' }}">
   <div class="page-head" style="margin-bottom:6px">
     <span class="sev">{{ i.severity_level.label if i.severity_level else '—' }}</span>
     <h1 style="margin:0">{{ i.title }}</h1>
@@ -24,6 +24,7 @@
     <dt>Opened</dt><dd>{{ i.created_at.strftime("%Y-%m-%d %H:%M UTC") if i.created_at else "—" }}</dd>
     {% if i.closed_at %}<dt>Closed</dt><dd>{{ i.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>{% endif %}
     <dt>Type</dt><dd>{{ i.incident_type.label if i.incident_type else "—" }}</dd>
+    <dt>Postmortem</dt><dd><a class="chip" href="/incidents/{{ i.id }}/postmortem">{{ "View" if i.postmortem else "Generate" }}</a></dd>
   </dl>
 
   {% if custom_fields %}
@@ -82,28 +83,33 @@
   </dd></div>
   {% endif %}
 
-  <div class="kv" style="align-items:start"><dt>Roles</dt><dd>
+  <section class="section">
+    <h2 class="section-title">Roles</h2>
     {% for rt in role_types %}
     {% set _assigned = role_assignees.get(rt.id, []) %}
     {% set _assigned_ids = _assigned | map(attribute='id') | list %}
-    <div style="margin-bottom:.6rem">
-      <strong>{{ rt.label }}</strong>:
-      {% if _assigned %}{{ _assigned | map(attribute='name') | join(', ') }}{% else %}<span class="muted">unassigned</span>{% endif %}
-      {% if _can_manage %}
-      <form method="post" action="/incidents/{{ i.id }}/roles" style="margin-top:4px; display:flex; gap:6px; align-items:flex-start">
+    <div class="role-row">
+      <span class="role-name">{{ rt.label }}</span>
+      <span class="assignees">{% if _assigned %}{{ _assigned | map(attribute='name') | join(', ') }}{% else %}<span class="muted">unassigned</span>{% endif %}</span>
+    </div>
+    {% if _can_manage %}
+    <details class="role-edit">
+      <summary>Assign</summary>
+      <form method="post" action="/incidents/{{ i.id }}/roles" style="margin-top:6px; display:flex; gap:6px; align-items:flex-start">
         <input type="hidden" name="role_type_id" value="{{ rt.id }}">
         <select name="user_ids" multiple size="3">
           {% for u in assignable_users %}<option value="{{ u.id }}"{% if u.id in _assigned_ids %} selected{% endif %}>{{ u.name }}</option>{% endfor %}
         </select>
         <button class="btn btn-sm" type="submit">Save</button>
       </form>
-      {% endif %}
-    </div>
+    </details>
+    {% endif %}
     {% endfor %}
     {% if not role_types %}<span class="muted">No roles configured</span>{% endif %}
-  </dd></div>
+  </section>
 
-  <div class="kv" style="align-items:start"><dt>Follow-ups{% if followups_open %} <span class="muted">({{ followups_open }} open)</span>{% endif %}</dt><dd>
+  <section class="section">
+    <h2 class="section-title">Follow-ups{% if followups_open %} <span class="count">{{ followups_open }} open</span>{% endif %}</h2>
     {% if _can_manage %}
     <form method="post" action="/incidents/{{ i.id }}/followups" style="margin-bottom:12px">
       <input name="title" placeholder="Action item…" required maxlength="300" style="width:100%; margin-bottom:6px">
@@ -116,7 +122,7 @@
     </form>
     {% endif %}
     {% for f in follow_ups %}
-    <div class="tl-entry{% if not f.is_open %} tl-pinned{% endif %}" style="border-left:2px solid var(--line); padding:6px 0 6px 12px; margin-bottom:8px{% if not f.is_open %}; opacity:.6{% endif %}">
+    <div class="tl-entry{% if not f.is_open %} tl-done{% endif %}" data-kind="followup">
       <div style="display:flex; gap:8px; align-items:baseline; flex-wrap:wrap">
         <span class="status" data-status="{{ 'active' if f.is_open else 'closed' }}"><span class="dot"></span>{{ f.status }}</span>
         <strong>{{ f.title }}</strong>
@@ -141,9 +147,10 @@
     {% else %}
     <span class="muted">No follow-ups yet.</span>
     {% endfor %}
-  </dd></div>
+  </section>
 
-  <div class="kv" style="align-items:start"><dt>Timeline</dt><dd>
+  <section class="section">
+    <h2 class="section-title">Timeline</h2>
     {% if _can_manage %}
     <form method="post" action="/incidents/{{ i.id }}/notes" style="margin-bottom:12px">
       <textarea name="body" placeholder="Add a note (Markdown supported)…" required style="width:100%"></textarea>
@@ -151,9 +158,10 @@
     </form>
     {% endif %}
     {% for e in events %}
-    <div class="tl-entry{% if e.pinned %} tl-pinned{% endif %}" style="border-left:2px solid var(--line); padding:6px 0 6px 12px; margin-bottom:8px">
+    <div class="tl-entry{% if e.pinned %} tl-pinned{% endif %}" data-kind="{{ e.entry_type }}">
       <div class="inc-meta" style="margin:0">
         {% if e.pinned %}<span title="pinned">📌</span> {% endif %}
+        {% if e.entry_type == "update" %}<span title="stakeholder update">📣</span> {% endif %}
         <span>{{ e.created_at.strftime("%b %d · %H:%M") if e.created_at else "" }}</span>
         <span>· {{ e.created_by_user.name if e.created_by_user else "system" }}</span>
         {% if _can_manage %}
@@ -169,16 +177,16 @@
         {% endif %}
       </div>
       <div style="margin-top:3px">
-        {% if e.entry_type == "note" %}{{ e.body | markdown | safe }}{% else %}{{ e.body }}{% endif %}
+        {% if e.entry_type in ("note", "update") %}{{ e.body | markdown | safe }}{% else %}{{ e.body }}{% endif %}
       </div>
     </div>
     {% else %}
     <span class="muted">No activity yet.</span>
     {% endfor %}
-  </dd></div>
+  </section>
 
   {% if _can_manage %}
-  <details style="margin-top:1rem">
+  <details class="section" style="margin-top:22px; padding-top:18px">
     <summary style="cursor:pointer;font-weight:600">Edit incident</summary>
     <form method="post" action="/incidents/{{ i.id }}/edit" style="margin-top:.75rem">
       <div style="margin-bottom:.5rem">
@@ -229,11 +237,36 @@
   </details>
   {% endif %}
 
+  {% if i.alerts %}
+  <section class="section">
+    <h2 class="section-title">Related alerts</h2>
+    {% for a in i.alerts %}
+    <div class="tl-entry" data-kind="{{ 'update' if a.status == 'firing' else 'closed' }}">
+      <span class="status" data-status="{{ 'active' if a.status == 'firing' else 'closed' }}"><span class="dot"></span>{{ a.status }}</span>
+      <strong>{{ a.title }}</strong>
+      <div class="inc-meta" style="margin-top:3px"><span>{{ a.source }}</span><span>· seen {{ a.occurrence_count }}×</span></div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   {% if _can_manage %}
-  <form method="post" action="/incidents/{{ i.id }}/status" style="display:inline-flex; gap:6px; align-items:center; margin-top:1rem">
-    <select name="status_id">{% for s in status_levels %}<option value="{{ s.id }}"{% if s.id == i.status_id %} selected{% endif %}>{{ s.label }}</option>{% endfor %}</select>
-    <button class="btn" type="submit">Update status</button>
-  </form>
+  <section class="respond">
+    <h2 class="section-title">Respond</h2>
+    <form method="post" action="/incidents/{{ i.id }}/updates">
+      <textarea name="message" placeholder="Post an update for stakeholders… (Markdown)" required style="width:100%"></textarea>
+      <div class="respond-row">
+        <select name="status_id"><option value="">— keep status —</option>{% for s in status_levels %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}</select>
+        <button class="btn btn-primary btn-sm" type="submit">Post update</button>
+      </div>
+    </form>
+    <form method="post" action="/incidents/{{ i.id }}/status" class="respond-row"
+          style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line-soft)">
+      <span class="muted" style="font-family:var(--font-mono); font-size:11.5px">Change status only</span>
+      <select name="status_id">{% for s in status_levels %}<option value="{{ s.id }}"{% if s.id == i.status_id %} selected{% endif %}>{{ s.label }}</option>{% endfor %}</select>
+      <button class="btn btn-sm" type="submit">Update status</button>
+    </form>
+  </section>
   {% endif %}
   <a class="backlink" href="/">← All incidents</a>
 </div>

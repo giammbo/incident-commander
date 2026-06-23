@@ -8,7 +8,7 @@
   <script src="/static/htmx.min.js" defer></script>
   <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/app.css?v=3">
+  <link rel="stylesheet" href="/static/app.css?v=4">
 </head>
 <body>
   {# Flash messages are set via request.session["flash"] and popped here, so every full
@@ -20,17 +20,21 @@
   <div class="shell">
     <aside class="sidebar">
       <a class="brand" href="/"><span class="pulse" aria-hidden="true"></span>Incident&nbsp;Commander</a>
+      {% set _p = request.url.path %}
       <nav class="nav">
-        <a href="/">Incidents</a>
-        <a href="/systems">Systems</a>
-        <a href="/components">Components</a>
-        <a href="/maps">Maps</a>
-        <a href="/follow-ups">Follow-ups</a>
+        <a href="/" class="{{ 'active' if _p == '/' or _p.startswith('/incidents') else '' }}">Incidents</a>
+        <a href="/systems" class="{{ 'active' if _p.startswith('/systems') else '' }}">Systems</a>
+        <a href="/components" class="{{ 'active' if _p.startswith('/components') else '' }}">Components</a>
+        <a href="/maps" class="{{ 'active' if _p.startswith('/maps') else '' }}">Maps</a>
+        <a href="/follow-ups" class="{{ 'active' if _p.startswith('/follow-ups') else '' }}">Follow-ups</a>
+        <a href="/alerts" class="{{ 'active' if _p.startswith('/alerts') else '' }}">Alerts</a>
+        <a href="/insights" class="{{ 'active' if _p.startswith('/insights') else '' }}">Insights</a>
       </nav>
       {% if _is_admin %}
       <nav class="nav nav-admin">
-        <a href="/users">Users</a>
-        <a href="/groups">Groups</a>
+        <a href="/users" class="{{ 'active' if _p.startswith('/users') else '' }}">Users</a>
+        <a href="/groups" class="{{ 'active' if _p.startswith('/groups') else '' }}">Groups</a>
+        <a href="/automations" class="{{ 'active' if _p.startswith('/automations') else '' }}">Automations</a>
       </nav>
       {% endif %}
       <div class="sidebar-foot">

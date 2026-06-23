@@ -113,6 +113,21 @@ def update_incident_slack(db: Session, incident: Incident, connection: SlackConn
     db.flush()
 
 
+def post_announcement(
+    db: Session, incident: Incident, connection: SlackConnection, text: str
+) -> None:
+    if not incident.slack_channel_id:
+        return
+    state = dict(incident.creation_state or {})
+    try:
+        slack.post_message(connection.bot_token, channel_id=incident.slack_channel_id, text=text)
+        state["update_announce"] = "ok"
+    except Exception:  # noqa: BLE001
+        state["update_announce"] = "failed"
+    incident.creation_state = state
+    db.flush()
+
+
 def close_incident_slack(db: Session, incident: Incident, connection: SlackConnection) -> None:
     if not incident.slack_channel_id:
         return

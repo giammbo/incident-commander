@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Incident, StatusCategory, StatusLevel
 
+_UNSET = object()
+
 
 def _scoped_components(db, system_id, component_ids):
     """Validate and resolve component_ids against system_id; return Component list."""
@@ -80,23 +82,28 @@ def update_incident(
     db,
     incident,
     *,
-    title,
-    description,
-    severity_level_id,
-    system_id,
-    component_ids,
-    incident_type_id=None,
+    title=_UNSET,
+    description=_UNSET,
+    severity_level_id=_UNSET,
+    system_id=_UNSET,
+    component_ids=_UNSET,
+    incident_type_id=_UNSET,
 ):
-    # When clearing the system, any stale component_ids are discarded silently.
-    if system_id is None:
-        component_ids = []
-    components = _scoped_components(db, system_id, component_ids)
-    incident.title = title.strip()
-    incident.description = description
-    incident.severity_level_id = severity_level_id
-    incident.system_id = system_id
-    incident.components = components
-    incident.incident_type_id = incident_type_id
+    if title is not _UNSET:
+        incident.title = title.strip()
+    if description is not _UNSET:
+        incident.description = description
+    if severity_level_id is not _UNSET:
+        incident.severity_level_id = severity_level_id
+    if system_id is not _UNSET:
+        incident.system_id = system_id
+        # clearing the system always discards stale components
+        if system_id is None:
+            component_ids = []
+    if component_ids is not _UNSET:
+        incident.components = _scoped_components(db, incident.system_id, component_ids)
+    if incident_type_id is not _UNSET:
+        incident.incident_type_id = incident_type_id
     db.flush()
     return incident
 

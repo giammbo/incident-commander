@@ -19,6 +19,7 @@ class ChatProvider(Protocol):
     def post_update(self, db, incident, *, connection) -> None: ...
     def post_closed(self, db, incident, *, connection) -> None: ...
     def announce_video(self, db, incident, *, connection) -> None: ...
+    def post_announcement(self, db, incident, *, connection, text) -> None: ...
 
 
 class MeetVideoProvider:
@@ -55,6 +56,11 @@ class SlackChatProvider:
         from app.services import incident_actions
 
         incident_actions.announce_meet_in_slack(db, incident, connection)
+
+    def post_announcement(self, db, incident, *, connection, text) -> None:
+        from app.services import incident_actions
+
+        incident_actions.post_announcement(db, incident, connection, text)
 
 
 VIDEO_PROVIDERS: dict[str, VideoProvider] = {

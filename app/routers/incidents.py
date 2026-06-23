@@ -18,7 +18,7 @@ from app.models import (
     System,
     User,
 )
-from app.services import webhooks
+from app.services import automation, webhooks
 from app.services.catalog import default_severity_level_id
 from app.services.incident_types import default_incident_type_id, list_incident_types
 from app.services.incidents import (
@@ -137,6 +137,7 @@ async def create(
         conn = db.scalar(select(SlackConnection).where(SlackConnection.id == slack_connection_id))
         if conn is not None:
             providers.CHAT_PROVIDERS["slack"].open_room(db, inc, connection=conn)
+    automation.run_rules(db, trigger="incident.opened", incident=inc, by_user=user.id)
     db.commit()
     webhooks.notify(db, inc, "opened", base_url=get_settings().base_url)
     if request.headers.get("HX-Request"):
@@ -548,6 +549,51 @@ def delete_event_route(
     return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
 
 
+@router.post("/incidents/{incident_id}/updates")
+def post_update_route(
+    request: Request,
+    incident_id: int,
+    message: str = Form(...),
+    status_id: int | None = Form(None),
+    user: User = Depends(require_role(Role.incident_commander)),
+    db: Session = Depends(get_db),
+):
+    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
+    if inc is None:
+        return HTMLResponse("Not found", status_code=404)
+    from app.services.updates import post_update
+
+    try:
+        kind = post_update(db, inc, message=message, status_id=status_id, by_user=user.id)
+    except ValueError as exc:
+        db.rollback()
+        request.session["flash"] = str(exc)
+        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    if inc.slack_connection_id and inc.slack_channel_id:
+        from app.services import providers
+
+        conn = db.scalar(
+            select(SlackConnection).where(SlackConnection.id == inc.slack_connection_id)
+        )
+        if conn is not None:
+            providers.CHAT_PROVIDERS["slack"].post_announcement(
+                db, inc, connection=conn, text=message
+            )
+            # If the update also moved the status, announce the lifecycle change too
+            # (mirrors the /status route), so a close/reopen via update is still visible.
+            if kind == "closed":
+                providers.CHAT_PROVIDERS["slack"].post_closed(db, inc, connection=conn)
+            elif kind is not None:
+                providers.CHAT_PROVIDERS["slack"].post_update(db, inc, connection=conn)
+    db.commit()
+    webhooks.notify(db, inc, "update", base_url=get_settings().base_url, message=message)
+    if kind is not None:
+        webhooks.notify(
+            db, inc, "closed" if kind == "closed" else "updated", base_url=get_settings().base_url
+        )
+    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+
+
 @router.post("/incidents/{incident_id}/status")
 def change_status(
     request: Request,
@@ -576,6 +622,9 @@ def change_status(
                 providers.CHAT_PROVIDERS["slack"].post_closed(db, inc, connection=conn)
             else:
                 providers.CHAT_PROVIDERS["slack"].post_update(db, inc, connection=conn)
+    # Run automation BEFORE the lifecycle webhook (mirrors the declare route), so the
+    # webhook payload reflects any automation side-effects on the incident's state.
+    automation.run_rules(db, trigger="incident.status_changed", incident=inc, by_user=user.id)
     webhooks.notify(
         db, inc, "closed" if kind == "closed" else "updated", base_url=get_settings().base_url
     )

@@ -9,6 +9,8 @@ from app.models import Component, SeverityLevel, System
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
+_UNSET = object()
+
 _DEFAULT_LEVELS = [
     {"label": "SEV1", "color": "#FF5D5D", "rank": 1, "is_default": False},
     {"label": "SEV2", "color": "#F4B740", "rank": 2, "is_default": True},
@@ -96,19 +98,22 @@ def update_system(
     db: Session,
     system: System,
     *,
-    name: str,
-    description: str | None,
-    owner_team_id: int | None = None,
+    name=_UNSET,
+    description=_UNSET,
+    owner_team_id=_UNSET,
 ) -> None:
-    name = name.strip()
-    if not name:
-        raise ValueError("System name is required")
-    clash = db.scalar(select(System).where(System.name == name, System.id != system.id))
-    if clash:
-        raise ValueError(f"A system '{name}' already exists")
-    system.name = name
-    system.description = description
-    system.owner_team_id = owner_team_id
+    if name is not _UNSET:
+        name = name.strip()
+        if not name:
+            raise ValueError("System name is required")
+        clash = db.scalar(select(System).where(System.name == name, System.id != system.id))
+        if clash:
+            raise ValueError(f"A system '{name}' already exists")
+        system.name = name
+    if description is not _UNSET:
+        system.description = description
+    if owner_team_id is not _UNSET:
+        system.owner_team_id = owner_team_id
     db.flush()
 
 
