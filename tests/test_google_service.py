@@ -53,7 +53,7 @@ class FakeService:
 def test_create_meet_returns_link(monkeypatch):
     store = {}
     monkeypatch.setattr(g, "_calendar_service", lambda **kw: FakeService(store))
-    link = g.create_meet(
+    link, event_id = g.create_meet(
         client_id="c",
         client_secret="s",
         refresh_token="r",
@@ -65,6 +65,7 @@ def test_create_meet_returns_link(monkeypatch):
         sleep=lambda *_: None,
     )
     assert link == "https://meet.google.com/abc-defg-hij"
+    assert event_id == "ev1"
     body = store["inserted"]["body"]
     assert (
         body["conferenceData"]["createRequest"]["conferenceSolutionKey"]["type"] == "hangoutsMeet"

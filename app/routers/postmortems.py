@@ -41,6 +41,15 @@ def view(
     inc = _incident(db, incident_id)
     if inc is None:
         return HTMLResponse("Not found", status_code=404)
+    try:
+        # Commit unconditionally: maybe_pull writes a throttle timestamp even when the
+        # fetch fails/returns nothing, and it MUST persist (get_db has no commit-on-teardown,
+        # so without this every page view would re-hit Google until the notes are ready —
+        # or forever for a connection that hasn't re-consented to drive.readonly).
+        pm_svc.maybe_pull_gemini_notes(db, inc)
+        db.commit()
+    except Exception:  # noqa: BLE001 — the postmortem page must render regardless
+        db.rollback()
     return templates.TemplateResponse(
         request,
         "postmortem.html",

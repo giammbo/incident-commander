@@ -67,7 +67,7 @@ def open_incident_google(db: Session, incident: Incident, connection) -> None:
     start = datetime.now(UTC)
     end = start + timedelta(hours=1)
     try:
-        link = google.create_meet(
+        link, event_id = google.create_meet(
             client_id=g.client_id,
             client_secret=g.client_secret,
             refresh_token=connection.refresh_token,
@@ -77,6 +77,8 @@ def open_incident_google(db: Session, incident: Incident, connection) -> None:
             end_iso=end.isoformat(),
         )
         incident.meet_url = link
+        incident.calendar_event_id = event_id
+        incident.google_connection_id = connection.id
         state["meet"] = "ok" if link else "failed"
     except Exception:  # noqa: BLE001
         state["meet"] = "failed"

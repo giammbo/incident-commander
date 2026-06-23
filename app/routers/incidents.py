@@ -19,6 +19,7 @@ from app.models import (
     User,
 )
 from app.services import automation, webhooks
+from app.services import postmortems as pm_svc
 from app.services.catalog import default_severity_level_id
 from app.services.incident_types import default_incident_type_id, list_incident_types
 from app.services.incidents import (
@@ -441,6 +442,10 @@ def close(
             if conn is not None:
                 providers.CHAT_PROVIDERS["slack"].post_closed(db, inc, connection=conn)
         webhooks.notify(db, inc, "closed", base_url=get_settings().base_url)
+        try:
+            pm_svc.maybe_pull_gemini_notes(db, inc)
+        except Exception:  # noqa: BLE001 — closing must not fail on notes
+            pass
         db.commit()
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(

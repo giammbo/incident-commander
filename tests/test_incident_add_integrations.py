@@ -44,7 +44,7 @@ def test_add_meet_creates_meet(client, db_session, monkeypatch):
     inc = _open_incident(db_session)
     db_session.flush()
     monkeypatch.setattr(
-        actions.google, "create_meet", lambda **k: "https://meet.google.com/abc-defg-hij"
+        actions.google, "create_meet", lambda **k: ("https://meet.google.com/abc-defg-hij", "evt-1")
     )
     r = client.post(
         f"/incidents/{inc.id}/add-meet",
@@ -66,7 +66,9 @@ def test_add_meet_posts_link_to_existing_channel(client, db_session, monkeypatch
     inc.slack_channel_id = "C1"  # channel already exists
     db_session.flush()
     posts = []
-    monkeypatch.setattr(actions.google, "create_meet", lambda **k: "https://meet.google.com/xyz")
+    monkeypatch.setattr(
+        actions.google, "create_meet", lambda **k: ("https://meet.google.com/xyz", "evt-1")
+    )
     monkeypatch.setattr(actions.slack, "post_message", lambda token, **k: posts.append(k["text"]))
     client.post(
         f"/incidents/{inc.id}/add-meet",
@@ -84,7 +86,9 @@ def test_add_meet_rejected_when_meet_exists(client, db_session, monkeypatch):
     inc.meet_url = "https://meet.google.com/existing"
     db_session.flush()
     called = []
-    monkeypatch.setattr(actions.google, "create_meet", lambda **k: called.append(1) or "x")
+    monkeypatch.setattr(
+        actions.google, "create_meet", lambda **k: (called.append(1) or "x", "evt-1")
+    )
     r = client.post(
         f"/incidents/{inc.id}/add-meet",
         data={"video": f"meet:{g.id}"},
@@ -105,7 +109,9 @@ def test_add_meet_rejected_when_closed(client, db_session, monkeypatch):
     close_incident(db_session, inc, closed_by=1)
     db_session.flush()
     called = []
-    monkeypatch.setattr(actions.google, "create_meet", lambda **k: called.append(1) or "x")
+    monkeypatch.setattr(
+        actions.google, "create_meet", lambda **k: (called.append(1) or "x", "evt-1")
+    )
     r = client.post(
         f"/incidents/{inc.id}/add-meet",
         data={"video": f"meet:{g.id}"},

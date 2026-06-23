@@ -72,6 +72,7 @@
     Redirect URL: <code>{{ base_url }}/connections/google/callback</code> (Meet).<br>
     Workspace orgs only: if connecting is blocked, an admin must allowlist the app in admin.google.com → Security → API controls → Manage Third-Party App Access.
   </p>
+  <p class="muted" style="font-size:12.5px">Now also requests <strong>Drive (read-only)</strong> to pull Gemini meeting notes into postmortems — existing connections must reconnect to grant it.</p>
   {% if google_connections %}
   <table style="margin-top:12px">
     <thead><tr><th>Account</th><th>Calendar</th></tr></thead>

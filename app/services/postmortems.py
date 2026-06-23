@@ -1,11 +1,31 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Postmortem
+
+_NOTES_START = "<!-- gemini-notes:start -->"
+_NOTES_END = "<!-- gemini-notes:end -->"
+
+
+def _notes_section(notes: str) -> str:
+    # Strip our delimiter markers out of the note text so a note that happens to contain
+    # them can't corrupt the section or break the idempotent re-upsert.
+    clean = (notes or "").replace(_NOTES_START, "").replace(_NOTES_END, "").strip()
+    return f"{_NOTES_START}\n## Meeting notes (Gemini)\n\n{clean}\n{_NOTES_END}"
+
+
+def _upsert_notes_section(body: str, notes: str) -> str:
+    section = _notes_section(notes)
+    body = body or ""
+    if _NOTES_START in body and _NOTES_END in body:
+        pattern = re.escape(_NOTES_START) + r".*?" + re.escape(_NOTES_END)
+        return re.sub(pattern, lambda _m: section, body, flags=re.DOTALL)
+    return (body + ("\n\n" if body.strip() else "")) + section
 
 
 def _humanize_duration(delta) -> str:
@@ -72,6 +92,8 @@ def render_template(incident, *, events, follow_ups, roles_by_type, role_types) 
     if not follow_ups:
         lines.append("_No follow-ups._")
     lines += ["", "## Lessons learned", "_What will we change so this doesn't recur?_", ""]
+    if getattr(incident, "gemini_notes", None):
+        lines += ["", _notes_section(incident.gemini_notes)]
     return "\n".join(lines)
 
 
@@ -116,3 +138,51 @@ def update_body(db: Session, postmortem, *, body, by_user) -> None:
     postmortem.updated_at = datetime.now(UTC)
     postmortem.updated_by = by_user
     db.flush()
+
+
+def maybe_pull_gemini_notes(db: Session, incident) -> bool:
+    """Best-effort, throttled lazy fetch of the Gemini notes doc into the postmortem.
+    Returns True only if notes were just fetched. Never raises."""
+    if incident.gemini_notes:
+        return False
+    if not incident.calendar_event_id or not incident.google_connection_id:
+        return False
+    state = dict(incident.creation_state or {})
+    now = datetime.now(UTC)
+    last = state.get("gemini_notes_try")
+    if last:
+        try:
+            if (now - datetime.fromisoformat(last)).total_seconds() < 120:
+                return False
+        except ValueError:
+            pass
+    state["gemini_notes_try"] = now.isoformat()
+    incident.creation_state = state
+    db.flush()
+
+    from app.models import GoogleConnection
+    from app.services import google
+    from app.settings_store import google_settings
+
+    conn = db.get(GoogleConnection, incident.google_connection_id)
+    if conn is None:
+        return False
+    g = google_settings(db)
+    try:
+        text = google.fetch_gemini_notes_text(
+            client_id=g.client_id,
+            client_secret=g.client_secret,
+            refresh_token=conn.refresh_token,
+            calendar_id=conn.calendar_id,
+            event_id=incident.calendar_event_id,
+        )
+    except Exception:  # noqa: BLE001 — best-effort; never break close/view
+        return False
+    if not text:
+        return False
+    incident.gemini_notes = text
+    postmortem = get_postmortem(db, incident)
+    if postmortem is not None:
+        postmortem.body = _upsert_notes_section(postmortem.body, text)
+    db.flush()
+    return True

@@ -6,6 +6,11 @@
   <h1>Postmortem</h1>
   <span class="stats">{{ i.title }}</span>
 </div>
+{% if i.meet_url and not i.gemini_notes %}
+<div class="muted" style="font-family:var(--font-mono); font-size:12px; margin:8px 0">
+  📝 Gemini meeting notes are pulled automatically after the call (they finalize a few minutes later) and added here.
+</div>
+{% endif %}
 {% if postmortem %}
 <div class="panel">
   <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px">

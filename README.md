@@ -29,7 +29,7 @@ response. Built to run on your own infrastructure, behind your own SSO.
 - **Follow-ups / action items** — create, assign (with a due date), and complete/cancel action items per incident; a global **Follow-ups** page surfaces all open items across incidents.
 - **Custom fields** — admin-defined fields (text, long text, single/multi-select, number, checkbox, date), scoped per incident type, shown on the declare form (type-dependent) and the detail.
 - **Stakeholder updates** — post a Markdown broadcast (optionally with a status change) that lands on the timeline, posts to the incident's Slack channel, and fires the outgoing webhooks with an `update` event.
-- **Postmortems** — a single Markdown document per incident, pre-assembled from the timeline + follow-ups, then editable.
+- **Postmortems** — a single Markdown document per incident, pre-assembled from the timeline + follow-ups, then editable. If the incident had a Google Meet with **"Take notes with Gemini"**, the generated notes are pulled in automatically (after the call) as a **"Meeting notes (Gemini)"** section.
 
 ### Insights
 

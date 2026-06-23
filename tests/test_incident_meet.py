@@ -40,7 +40,7 @@ def test_create_incident_makes_meet(client, db_session, monkeypatch):
     client.post("/login", data={"email": "ic@x.io", "password": "pw-123456"})
 
     monkeypatch.setattr(
-        actions.google, "create_meet", lambda **k: "https://meet.google.com/abc-defg-hij"
+        actions.google, "create_meet", lambda **k: ("https://meet.google.com/abc-defg-hij", "evt-1")
     )
     r = client.post(
         "/incidents",

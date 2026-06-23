@@ -290,6 +290,7 @@ class Incident(Base):
     slack_channel_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     meet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     calendar_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    gemini_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     creation_state: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
