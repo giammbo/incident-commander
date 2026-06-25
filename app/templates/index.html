@@ -41,7 +41,7 @@
   {% endif %}
   <select name="video" aria-label="Video call">
     <option value="">No video call</option>
-    {% for c in google_connections %}<option value="meet:{{ c.id }}">Google Meet — {{ c.account_email }}</option>{% endfor %}
+    {% if google_configured %}<option value="meet">Google Meet</option>{% endif %}
   </select>
   <button class="btn btn-primary" type="submit">Declare incident</button>
 </form>

@@ -4,15 +4,14 @@ import app.services.providers as providers
 
 
 def test_parse_video_choice():
-    assert providers.parse_video_choice("") == (None, None)
-    assert providers.parse_video_choice("jitsi") == (None, None)
-    assert providers.parse_video_choice("meet:5") == ("meet", 5)
-    assert providers.parse_video_choice("meet:abc") == (None, None)  # non-numeric id
-    assert providers.parse_video_choice("unknown") == (None, None)  # unknown provider
+    assert providers.parse_video_choice("") is None
+    assert providers.parse_video_choice("jitsi") is None
+    assert providers.parse_video_choice("meet") == "meet"
+    assert providers.parse_video_choice("unknown") is None
 
 
 def test_registry_shapes():
-    assert providers.VIDEO_PROVIDERS["meet"].needs_connection is True
+    assert providers.VIDEO_PROVIDERS["meet"].needs_connection is False
     assert providers.CHAT_PROVIDERS["slack"].key == "slack"
 
 
@@ -23,12 +22,12 @@ def test_meet_provider_delegates(db_session, monkeypatch):
     monkeypatch.setattr(
         actions,
         "open_incident_google",
-        lambda db, inc, conn: called.setdefault("meet", (inc, conn)),
+        lambda db, inc: called.setdefault("meet", inc),
     )
     inc = SimpleNamespace()
     conn = SimpleNamespace()
     providers.VIDEO_PROVIDERS["meet"].create(db_session, inc, connection=conn)
-    assert called["meet"] == (inc, conn)
+    assert called["meet"] is inc
 
 
 def test_slack_provider_delegates(db_session, monkeypatch):

@@ -20,7 +20,7 @@ def settings_page(
 ):
     from sqlalchemy import select
 
-    from app.models import GoogleConnection, SeverityLevel, SlackConnection, Webhook
+    from app.models import SeverityLevel, SlackConnection, Webhook
     from app.services.custom_fields import FIELD_TYPES, list_field_defs
     from app.services.email import is_smtp_configured
     from app.services.incident_types import list_incident_types
@@ -34,7 +34,6 @@ def settings_page(
     severity_levels = list(db.scalars(select(SeverityLevel).order_by(SeverityLevel.rank)))
     status_levels = list(db.scalars(select(StatusLevel).order_by(StatusLevel.rank)))
     slack_connections = list(db.scalars(select(SlackConnection).order_by(SlackConnection.id)))
-    google_connections = list(db.scalars(select(GoogleConnection).order_by(GoogleConnection.id)))
     webhooks = list(db.scalars(select(Webhook).order_by(Webhook.id)))
     incident_role_types = list_incident_role_types(db)
     incident_types = list_incident_types(db)
@@ -58,11 +57,7 @@ def settings_page(
             "slack_can_connect": bool(slack.enabled and slack.client_id and slack.client_secret),
             "slack_connections": slack_connections,
             "google": google,
-            "google_configured": bool(google.client_id and google.client_secret),
-            "google_can_connect": bool(
-                google.enabled and google.client_id and google.client_secret
-            ),
-            "google_connections": google_connections,
+            "google_configured": bool(google.service_account_json and google.impersonate_email),
             "sso": sso,
             "base_url": get_settings().base_url,
             "severity_levels": severity_levels,
@@ -166,18 +161,20 @@ def settings_slack(
 
 @router.post("/settings/google")
 def settings_google(
-    client_id: str = Form(""),
-    client_secret: str = Form(""),
-    enabled: bool = Form(False),
-    user: User = Depends(require_role(Role.admin)),
+    request: Request,
     db: Session = Depends(get_db),
+    user: User = Depends(require_role(Role.admin)),
+    service_account_json: str = Form(""),
+    impersonate_email: str = Form(""),
+    enabled: str = Form(""),
 ):
     g = google_settings(db)
-    g.client_id = client_id or None
-    g.enabled = enabled
-    if client_secret:
-        g.client_secret = client_secret
+    g.enabled = enabled == "true"
+    g.impersonate_email = impersonate_email.strip() or None
+    if service_account_json.strip():
+        g.service_account_json = service_account_json.strip()
     db.commit()
+    request.session["flash"] = "Google settings saved."
     return RedirectResponse("/settings", status_code=303)
 
 

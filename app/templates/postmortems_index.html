@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+{% set _role = effective_role(current_user) %}
+{% set _can_manage = _role and _role.value in ("admin", "incident_commander") %}
+<div class="page-head">
+  <h1>Postmortems</h1>
+  <span class="stats"><b>{{ incidents | length }}</b> total</span>
+</div>
+
+{% if _can_manage and to_write %}
+<div class="card">
+  <h2>To write — closed incidents without a postmortem</h2>
+  <div class="incident-list">
+    {% for i in to_write %}
+    <div class="incident" data-status="closed"
+         style="--sev-color: {{ i.severity_level.color if i.severity_level else '#5E7180' }}">
+      <span class="sev">{{ i.severity_level.label if i.severity_level else '—' }}</span>
+      <div class="inc-main">
+        <a class="inc-title" href="/incidents/{{ i.id }}">{{ i.title }}</a>
+        <div class="inc-meta"><span>{{ i.created_at.strftime("%b %d · %H:%M") if i.created_at else "" }}</span></div>
+      </div>
+      <span class="row-actions">
+        <form method="post" action="/incidents/{{ i.id }}/postmortem/generate" style="display:inline">
+          <button class="btn btn-primary btn-sm" type="submit">Generate</button>
+        </form>
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if incidents %}
+<div class="incident-list">
+  {% for i in incidents %}
+  <div class="incident" data-status="{{ i.status.category.value if i.status else 'closed' }}"
+       style="--sev-color: {{ i.severity_level.color if i.severity_level else '#5E7180' }}">
+    <span class="sev">{{ i.severity_level.label if i.severity_level else '—' }}</span>
+    <div class="inc-main">
+      <a class="inc-title" href="/incidents/{{ i.id }}/postmortem">{{ i.title }}</a>
+      <div class="inc-meta">
+        <span>{{ i.created_at.strftime("%b %d · %H:%M") if i.created_at else "" }}</span>
+        {% if i.postmortem and i.postmortem.updated_at %}<span>· updated {{ i.postmortem.updated_at.strftime("%b %d") }}</span>{% endif %}
+      </div>
+    </div>
+    <span class="status" data-status="{{ i.status.category.value if i.status else 'closed' }}"><span class="dot"></span>{{ i.status.label if i.status else '—' }}</span>
+    <span class="row-actions"><a class="chip" href="/incidents/{{ i.id }}/postmortem">View</a></span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">No postmortems yet. Generate one from an incident's detail page.</div>
+{% endif %}
+{% endblock %}

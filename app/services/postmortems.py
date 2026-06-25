@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Postmortem
+from app.models import Incident, Postmortem, StatusCategory, StatusLevel
 
 _NOTES_START = "<!-- gemini-notes:start -->"
 _NOTES_END = "<!-- gemini-notes:end -->"
@@ -97,6 +97,31 @@ def render_template(incident, *, events, follow_ups, roles_by_type, role_types) 
     return "\n".join(lines)
 
 
+def list_incidents_with_postmortem(db: Session):
+    """Incidents that have a postmortem, newest incident first (archive view)."""
+    return list(
+        db.scalars(
+            select(Incident)
+            .join(Postmortem, Postmortem.incident_id == Incident.id)
+            .order_by(Incident.created_at.desc())
+        )
+    )
+
+
+def list_closed_incidents_without_postmortem(db: Session):
+    """Closed incidents that don't have a postmortem yet — the 'to write' list.
+    'Closed' mirrors Incident.is_closed (status category == closed)."""
+    no_pm = ~select(Postmortem.id).where(Postmortem.incident_id == Incident.id).exists()
+    return list(
+        db.scalars(
+            select(Incident)
+            .join(StatusLevel, Incident.status_id == StatusLevel.id)
+            .where(StatusLevel.category == StatusCategory.closed, no_pm)
+            .order_by(Incident.created_at.desc())
+        )
+    )
+
+
 def _build(db: Session, incident) -> str:
     from app.services import followups, roles
 
@@ -145,7 +170,7 @@ def maybe_pull_gemini_notes(db: Session, incident) -> bool:
     Returns True only if notes were just fetched. Never raises."""
     if incident.gemini_notes:
         return False
-    if not incident.calendar_event_id or not incident.google_connection_id:
+    if not incident.meet_space_name:
         return False
     state = dict(incident.creation_state or {})
     now = datetime.now(UTC)
@@ -160,21 +185,17 @@ def maybe_pull_gemini_notes(db: Session, incident) -> bool:
     incident.creation_state = state
     db.flush()
 
-    from app.models import GoogleConnection
     from app.services import google
     from app.settings_store import google_settings
 
-    conn = db.get(GoogleConnection, incident.google_connection_id)
-    if conn is None:
-        return False
     g = google_settings(db)
+    if not (g.service_account_json and g.impersonate_email):
+        return False
     try:
         text = google.fetch_gemini_notes_text(
-            client_id=g.client_id,
-            client_secret=g.client_secret,
-            refresh_token=conn.refresh_token,
-            calendar_id=conn.calendar_id,
-            event_id=incident.calendar_event_id,
+            service_account_json=g.service_account_json,
+            impersonate_email=g.impersonate_email,
+            space_name=incident.meet_space_name,
         )
     except Exception:  # noqa: BLE001 — best-effort; never break close/view
         return False

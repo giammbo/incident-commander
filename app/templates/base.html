@@ -8,7 +8,7 @@
   <script src="/static/htmx.min.js" defer></script>
   <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/app.css?v=4">
+  <link rel="stylesheet" href="/static/app.css?v=5">
 </head>
 <body>
   {# Flash messages are set via request.session["flash"] and popped here, so every full
@@ -27,6 +27,7 @@
         <a href="/components" class="{{ 'active' if _p.startswith('/components') else '' }}">Components</a>
         <a href="/maps" class="{{ 'active' if _p.startswith('/maps') else '' }}">Maps</a>
         <a href="/follow-ups" class="{{ 'active' if _p.startswith('/follow-ups') else '' }}">Follow-ups</a>
+        <a href="/postmortems" class="{{ 'active' if _p.startswith('/postmortems') else '' }}">Postmortems</a>
         <a href="/alerts" class="{{ 'active' if _p.startswith('/alerts') else '' }}">Alerts</a>
         <a href="/insights" class="{{ 'active' if _p.startswith('/insights') else '' }}">Insights</a>
       </nav>

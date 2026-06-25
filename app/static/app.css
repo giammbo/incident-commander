@@ -422,3 +422,29 @@ select[multiple] option:checked { background: var(--accent-soft); color: #fff; }
 .tl-entry[data-kind="followup"],
 .tl-entry[data-kind="roles_changed"]                            { border-left-color: var(--sev2); }
 .tl-done { opacity: .6; }
+
+/* ---------- Incident detail tabs ---------- */
+.tabs { margin-top: 16px; }
+.tab-radio { position: absolute; width: 1px; height: 1px; opacity: 0; }  /* hidden but focusable */
+.tab-bar { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+.tab-bar label {
+  cursor: pointer; padding: 8px 14px; font-size: 13px; color: var(--ink-3);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; user-select: none;
+}
+.tab-bar label:hover { color: var(--ink); }
+.tab-panel { display: none; }
+#tab-overview:checked  ~ #panel-overview,
+#tab-timeline:checked  ~ #panel-timeline,
+#tab-followups:checked ~ #panel-followups,
+#tab-alerts:checked    ~ #panel-alerts { display: block; }
+#tab-overview:checked  ~ .tab-bar label[for="tab-overview"],
+#tab-timeline:checked  ~ .tab-bar label[for="tab-timeline"],
+#tab-followups:checked ~ .tab-bar label[for="tab-followups"],
+#tab-alerts:checked    ~ .tab-bar label[for="tab-alerts"] { color: var(--accent); border-bottom-color: var(--accent); }
+/* keyboard focus: outline the label of whichever tab radio holds focus */
+#tab-overview:focus-visible  ~ .tab-bar label[for="tab-overview"],
+#tab-timeline:focus-visible  ~ .tab-bar label[for="tab-timeline"],
+#tab-followups:focus-visible ~ .tab-bar label[for="tab-followups"],
+#tab-alerts:focus-visible    ~ .tab-bar label[for="tab-alerts"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the panel's first .section has a redundant top divider under the tab bar */
+.tab-panel > .section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }

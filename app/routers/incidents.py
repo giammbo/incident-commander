@@ -8,7 +8,6 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import (
     Component,
-    GoogleConnection,
     Incident,
     IncidentType,
     Role,
@@ -44,11 +43,7 @@ def history(request: Request, user: User = Depends(require_user), db: Session = 
         else []
     )
     goog = google_settings(db)
-    google_connections = (
-        list(db.scalars(select(GoogleConnection).order_by(GoogleConnection.id)))
-        if (goog.enabled and goog.client_id and goog.client_secret)
-        else []
-    )
+    google_configured = bool(goog.enabled and goog.service_account_json and goog.impersonate_email)
     severity_levels = list(db.scalars(select(SeverityLevel).order_by(SeverityLevel.rank)))
     status_levels = list(db.scalars(select(StatusLevel).order_by(StatusLevel.rank)))
     systems = list(db.scalars(select(System).order_by(System.name)))
@@ -75,7 +70,7 @@ def history(request: Request, user: User = Depends(require_user), db: Session = 
             "status_levels": status_levels,
             "systems": systems,
             "slack_connections": slack_connections,
-            "google_connections": google_connections,
+            "google_configured": google_configured,
             "incident_types": incident_types,
             "fields": fields,
             "values": {},
@@ -126,14 +121,10 @@ async def create(
     if missing:
         request.session["flash"] = "Missing required: " + ", ".join(missing)
 
-    vkey, vconn_id = providers.parse_video_choice(video)
+    vkey = providers.parse_video_choice(video)
     if vkey:
         vp = providers.VIDEO_PROVIDERS[vkey]
-        gconn = None
-        if vp.needs_connection and vconn_id is not None:
-            gconn = db.scalar(select(GoogleConnection).where(GoogleConnection.id == vconn_id))
-        if not vp.needs_connection or gconn is not None:
-            vp.create(db, inc, connection=gconn)
+        vp.create(db, inc, connection=None)
     if slack_connection_id:
         conn = db.scalar(select(SlackConnection).where(SlackConnection.id == slack_connection_id))
         if conn is not None:
@@ -234,11 +225,7 @@ def detail(
         else []
     )
     goog = google_settings(db)
-    google_connections = (
-        list(db.scalars(select(GoogleConnection).order_by(GoogleConnection.id)))
-        if (goog.enabled and goog.client_id and goog.client_secret)
-        else []
-    )
+    google_configured = bool(goog.enabled and goog.service_account_json and goog.impersonate_email)
     status_levels = list(db.scalars(select(StatusLevel).order_by(StatusLevel.rank)))
     from app.services.followups import list_followups, open_count
     from app.services.roles import assignments_by_role, list_incident_role_types
@@ -267,7 +254,7 @@ def detail(
             "status_levels": status_levels,
             "systems": systems,
             "slack_connections": slack_connections,
-            "google_connections": google_connections,
+            "google_configured": google_configured,
             "role_types": role_types,
             "role_assignees": role_assignees,
             "assignable_users": assignable_users,
@@ -344,22 +331,12 @@ def add_meet(
     if inc.meet_url:
         request.session["flash"] = "This incident already has a video bridge."
         return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
-    vkey, vconn_id = providers.parse_video_choice(video)
+    vkey = providers.parse_video_choice(video)
     vp = providers.VIDEO_PROVIDERS.get(vkey) if vkey else None
     if vp is None:
         request.session["flash"] = "Unknown video provider."
         return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
-    gconn = None
-    if vp.needs_connection:
-        gconn = (
-            db.scalar(select(GoogleConnection).where(GoogleConnection.id == vconn_id))
-            if vconn_id
-            else None
-        )
-        if gconn is None:
-            request.session["flash"] = "Pick a Google account for Meet."
-            return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
-    vp.create(db, inc, connection=gconn)
+    vp.create(db, inc, connection=None)
     if inc.meet_url and inc.slack_channel_id:
         sconn = db.scalar(
             select(SlackConnection).where(SlackConnection.id == inc.slack_connection_id)

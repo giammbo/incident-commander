@@ -29,7 +29,7 @@ response. Built to run on your own infrastructure, behind your own SSO.
 - **Follow-ups / action items** — create, assign (with a due date), and complete/cancel action items per incident; a global **Follow-ups** page surfaces all open items across incidents.
 - **Custom fields** — admin-defined fields (text, long text, single/multi-select, number, checkbox, date), scoped per incident type, shown on the declare form (type-dependent) and the detail.
 - **Stakeholder updates** — post a Markdown broadcast (optionally with a status change) that lands on the timeline, posts to the incident's Slack channel, and fires the outgoing webhooks with an `update` event.
-- **Postmortems** — a single Markdown document per incident, pre-assembled from the timeline + follow-ups, then editable. If the incident had a Google Meet with **"Take notes with Gemini"**, the generated notes are pulled in automatically (after the call) as a **"Meeting notes (Gemini)"** section.
+- **Postmortems** — a single Markdown document per incident, pre-assembled from the timeline + follow-ups, then editable. If the incident had a Google Meet, the Gemini-generated notes are pulled in automatically (after the call) as a **"Meeting notes (Gemini)"** section — Gemini smart notes and transcription are on by default for every incident Meet (requires the Google Meet API + Gemini for Workspace).
 
 ### Insights
 
@@ -64,9 +64,9 @@ response. Built to run on your own infrastructure, behind your own SSO.
 - **Auth & RBAC** — local accounts (argon2) **and** generic **OIDC SSO** (Azure Entra / Okta / Google / any OIDC IdP) with domain gating and a local break-glass. Three group-based roles: Admin, Incident Commander, Read-only.
 - **User & group management** — admin UI to invite users (email when SMTP is set, or a generated temp password), organize groups, assign roles.
 - **Encrypted settings** — every integration credential/token is encrypted at rest (Fernet); secrets are never rendered in the UI or written to logs.
-- **The UI** — a focused dark interface (incident.io-inspired): the **Flamingo** accent marks live incidents and primary actions, severity stays a semantic colour, Markdown is rendered safely (sanitized with `nh3`). Left-sidebar nav: Incidents · Systems · Components · Maps · Follow-ups · Alerts · Insights (+ admin Users / Groups / Automations), with the active page highlighted and Settings/Account at the bottom.
+- **The UI** — a focused dark interface (incident.io-inspired): the **Flamingo** accent marks live incidents and primary actions, severity stays a semantic colour, Markdown is rendered safely (sanitized with `nh3`). Left-sidebar nav: Incidents · Systems · Components · Maps · Follow-ups · Postmortems · Alerts · Insights (+ admin Users / Groups / Automations), with the active page highlighted and Settings/Account at the bottom.
 
-All integrations are partial-failure-safe: an incident is always created as a record, integrations are added only when you select a connection, and a failing integration is surfaced on the incident — never a 500.
+All integrations are partial-failure-safe: an incident is always created as a record, integrations run only when configured and applicable (Slack requires selecting a connection per incident; Google Meet uses the globally-configured service account), and a failing integration is surfaced on the incident — never a 500.
 
 ## Quick start (Docker Compose)
 
@@ -130,12 +130,22 @@ issuer + subject claim (no silent account takeover).
 
 ### Google Meet (video bridge)
 
-OAuth credentials are created in the **Google Cloud Console** (<https://console.cloud.google.com>) —
-**not** the Workspace Admin console:
+Meets are created via the **Google Meet API** under a **service account with Domain-Wide Delegation
+(DWD)** that impersonates a fixed Workspace user. No per-user OAuth or Calendar events are involved.
 
-1. Enable the **Google Calendar API** (Meet links are Calendar `conferenceData`).
-2. Create an **OAuth client ID (Web application)** and register the redirect URI `<BASE_URL>/connections/google/callback`.
-3. Paste the **Client ID / secret** into **Settings → Google**, tick *Enabled*, save, then connect the account from Settings and grant **offline** access (stores the encrypted refresh token). You can then pick that account when declaring an incident.
+1. In **Google Cloud Console** (<https://console.cloud.google.com>), enable the **Google Meet API**
+   and the **Google Drive API**.
+2. Create a **service account**; create and download a **JSON key**. No project IAM roles are
+   needed. Note its numeric **client ID**.
+3. In **Workspace Admin Console → Security → API controls → Domain-wide delegation**, authorize that
+   client ID for the scopes `https://www.googleapis.com/auth/meetings.space.created` and
+   `https://www.googleapis.com/auth/drive.readonly`.
+4. In **Settings → Google**, paste the **JSON key** and an **impersonation user** email — a
+   Workspace user with a **Gemini for Workspace** license. Incidents' Meets are created as this
+   user, and its Drive receives the Gemini notes. Tick *Enabled*, save.
+
+Incident Meets are created via the Meet API with **Gemini smart notes and transcription on by
+default**. No Calendar event is created. Requires a Workspace edition with the Gemini add-on.
 
 (Slack is analogous: create an app at <https://api.slack.com/apps>, register
 `<BASE_URL>/connections/slack/callback`, paste the credentials into **Settings → Slack**, then connect a workspace.)

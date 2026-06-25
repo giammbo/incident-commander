@@ -1,10 +1,11 @@
 import pytest
 import sqlalchemy as sa
 
-from app.models import GoogleConnection, SeverityLevel
+from app.models import SeverityLevel
 from app.services import postmortems as pm
 from app.services import statuses
 from app.services.incidents import create_incident
+from app.settings_store import google_settings
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +29,13 @@ def _incident(db):
     inc = create_incident(db, title="X", severity_level_id=sev.id, is_private=False, created_by=1)
     db.flush()
     return inc
+
+
+def _enable_google_sa(db):
+    g = google_settings(db)
+    g.service_account_json = '{"type": "service_account"}'
+    g.impersonate_email = "bot@example.com"
+    db.flush()
 
 
 def test_upsert_appends_then_replaces():
@@ -58,18 +66,15 @@ def test_render_template_includes_notes_when_set(db_session):
     assert "Meeting notes (Gemini)" in body and "what we discussed" in body
 
 
-def test_maybe_pull_noop_without_event_id(db_session):
+def test_maybe_pull_noop_without_space_name(db_session):
     inc = _incident(db_session)
-    assert pm.maybe_pull_gemini_notes(db_session, inc) is False  # no calendar_event_id
+    assert pm.maybe_pull_gemini_notes(db_session, inc) is False  # no meet_space_name
 
 
 def test_maybe_pull_fetches_and_upserts(db_session, monkeypatch):
     inc = _incident(db_session)
-    conn = GoogleConnection(account_email="o@x.io", refresh_token="r", calendar_id="primary")
-    db_session.add(conn)
-    db_session.flush()
-    inc.calendar_event_id = "evt-1"
-    inc.google_connection_id = conn.id
+    _enable_google_sa(db_session)
+    inc.meet_space_name = "spaces/abc-def"
     existing = pm.generate(db_session, inc, by_user=1)  # postmortem already exists
     db_session.flush()
     from app.services import google
@@ -82,11 +87,8 @@ def test_maybe_pull_fetches_and_upserts(db_session, monkeypatch):
 
 def test_maybe_pull_throttled_and_swallows_errors(db_session, monkeypatch):
     inc = _incident(db_session)
-    conn = GoogleConnection(account_email="o@x.io", refresh_token="r", calendar_id="primary")
-    db_session.add(conn)
-    db_session.flush()
-    inc.calendar_event_id = "evt-1"
-    inc.google_connection_id = conn.id
+    _enable_google_sa(db_session)
+    inc.meet_space_name = "spaces/abc-def"
     from app.services import google
 
     def boom(**kw):

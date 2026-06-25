@@ -16,6 +16,19 @@ def _incident(db, incident_id):
     return db.scalar(select(Incident).where(Incident.id == incident_id))
 
 
+@router.get("/postmortems", response_class=HTMLResponse)
+def index(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    return templates.TemplateResponse(
+        request,
+        "postmortems_index.html",
+        {
+            "current_user": user,
+            "incidents": pm_svc.list_incidents_with_postmortem(db),
+            "to_write": pm_svc.list_closed_incidents_without_postmortem(db),
+        },
+    )
+
+
 @router.post("/incidents/{incident_id}/postmortem/generate")
 def generate(
     request: Request,

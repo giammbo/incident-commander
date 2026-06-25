@@ -24,21 +24,35 @@ def _admin(client, db_session):
 def test_save_google_and_sso(client, db_session):
     _admin(client, db_session)
     client.post(
-        "/settings/google", data={"client_id": "gid", "client_secret": "gsec", "enabled": "true"}
+        "/settings/google",
+        data={
+            "service_account_json": '{"type":"service_account","client_email":"bot@proj.iam"}',
+            "impersonate_email": "ops@example.com",
+            "enabled": "true",
+        },
     )
     client.post(
         "/settings/sso", data={"sso_enabled": "true", "allowed_domains": "acme.io,example.com"}
     )
     g = google_settings(db_session)
     s = sso_settings(db_session)
-    assert g.client_id == "gid" and g.client_secret == "gsec" and g.enabled is True
+    assert g.impersonate_email == "ops@example.com"
+    assert g.enabled is True
+    assert '"service_account"' in g.service_account_json
     assert (
         s.sso_enabled is True
         and s.allow_local_login is False
         and s.allowed_domains == "acme.io,example.com"
     )
-    # editing google without secret keeps it
+    # editing google without JSON keeps the stored JSON
     client.post(
-        "/settings/google", data={"client_id": "gid2", "client_secret": "", "enabled": "true"}
+        "/settings/google",
+        data={
+            "service_account_json": "",
+            "impersonate_email": "ops2@example.com",
+            "enabled": "true",
+        },
     )
-    assert google_settings(db_session).client_secret == "gsec"
+    g2 = google_settings(db_session)
+    assert g2.impersonate_email == "ops2@example.com"
+    assert '"service_account"' in g2.service_account_json

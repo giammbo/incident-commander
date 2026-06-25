@@ -62,26 +62,18 @@
 <div class="card">
   <h2>Google</h2>
   <form method="post" action="/settings/google">
-    <label class="field-block"><span>Client ID</span><input name="client_id" value="{{ google.client_id or '' }}"></label>
-    <label class="field-block"><span>Client secret</span><input name="client_secret" type="password" placeholder="{{ 'leave blank to keep current' if google.client_secret else '' }}"></label>
+    <label class="field-block"><span>Service account JSON key</span>
+      <textarea name="service_account_json" rows="6" placeholder="{{ 'configured — leave blank to keep current' if google.service_account_json else 'paste the service account JSON key' }}"></textarea>
+    </label>
+    <label class="field-block"><span>Impersonate user (Gemini-licensed)</span>
+      <input name="impersonate_email" value="{{ google.impersonate_email or '' }}" placeholder="incidents@yourdomain.com"></label>
     <label class="check"><input type="checkbox" name="enabled" value="true" {{ 'checked' if google.enabled else '' }}> Enabled</label>
     <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Save Google</button></div>
   </form>
   <p class="muted" style="margin:10px 0 0; font-size:12.5px">
-    Create these in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> — <strong>not</strong> the Workspace Admin console (admin.google.com). Enable the <strong>Google Calendar API</strong>, create an <strong>OAuth client ID (Web application)</strong>, and register both redirect URLs below.<br>
-    Redirect URL: <code>{{ base_url }}/connections/google/callback</code> (Meet).<br>
-    Workspace orgs only: if connecting is blocked, an admin must allowlist the app in admin.google.com → Security → API controls → Manage Third-Party App Access.
+    Create a <strong>service account</strong> in Google Cloud, enable <strong>Domain-Wide Delegation</strong>, and in the Workspace Admin Console authorize its client-id for
+    <code>meetings.space.created</code> and <code>drive.readonly</code>. The impersonation user must hold a <strong>Gemini for Workspace</strong> license. Incident Meets are created via the Meet API with Gemini smart notes + transcription on by default.
   </p>
-  <p class="muted" style="font-size:12.5px">Now also requests <strong>Drive (read-only)</strong> to pull Gemini meeting notes into postmortems — existing connections must reconnect to grant it.</p>
-  {% if google_connections %}
-  <table style="margin-top:12px">
-    <thead><tr><th>Account</th><th>Calendar</th></tr></thead>
-    <tbody>{% for c in google_connections %}<tr><td>{{ c.account_email }}</td><td class="muted">{{ c.calendar_id }}</td></tr>{% endfor %}</tbody>
-  </table>
-  {% else %}<p class="muted" style="margin-top:12px">No Google accounts connected yet.</p>{% endif %}
-  {% if google_can_connect %}
-  <div style="margin-top:12px"><a class="btn btn-primary" href="/connections/google/connect">Connect Google</a></div>
-  {% else %}<p class="muted" style="margin-top:8px">Save &amp; enable Google credentials above to connect an account.</p>{% endif %}
 </div>
 
 <div class="card">

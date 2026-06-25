@@ -25,12 +25,12 @@ class ChatProvider(Protocol):
 class MeetVideoProvider:
     key = "meet"
     label = "Google Meet"
-    needs_connection = True
+    needs_connection = False
 
     def create(self, db, incident, *, connection=None) -> None:
         from app.services import incident_actions
 
-        incident_actions.open_incident_google(db, incident, connection)
+        incident_actions.open_incident_google(db, incident)
 
 
 class SlackChatProvider:
@@ -69,13 +69,10 @@ VIDEO_PROVIDERS: dict[str, VideoProvider] = {
 CHAT_PROVIDERS: dict[str, ChatProvider] = {"slack": SlackChatProvider()}
 
 
-def parse_video_choice(value: str) -> tuple[str | None, int | None]:
-    """'' -> (None, None); 'meet:5' -> ('meet', 5); unknown/invalid -> (None, None)."""
+def parse_video_choice(value: str) -> str | None:
+    """'' -> None; 'meet' -> 'meet'; unknown -> None."""
     if not value:
-        return (None, None)
-    if value.startswith("meet:"):
-        rest = value.split(":", 1)[1]
-        return ("meet", int(rest)) if rest.isdigit() else (None, None)
+        return None
     if value in VIDEO_PROVIDERS:
-        return (value, None)
-    return (None, None)
+        return value
+    return None
