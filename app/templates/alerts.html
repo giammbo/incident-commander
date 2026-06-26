@@ -8,6 +8,7 @@
     <a href="/alerts?status=resolved"{% if filter_status == 'resolved' %} class="active"{% endif %}>Resolved</a>
   </span>
 </div>
+<p class="page-sub">Inbound alerts from your monitoring, deduplicated — promote one to a new incident or attach it to an existing one.</p>
 
 <div class="incident-list">
   {% for a in alerts %}

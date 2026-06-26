@@ -29,6 +29,7 @@ def inbox(
         request,
         "alerts.html",
         {
+            "current_user": user,
             "alerts": alerts,
             "filter_status": status,
             "firing_count": firing,

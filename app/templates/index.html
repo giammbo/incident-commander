@@ -5,6 +5,7 @@
   <h1>Incidents</h1>
   <span class="stats"><b>{{ open_count }}</b> open <span class="sep">/</span> {{ incidents | length }} total</span>
 </div>
+<p class="page-sub">Declare and run incidents in one place — severity, status, roles, timeline, follow-ups and integrations.</p>
 
 {% set _role = effective_role(current_user) %}
 {% if _role and _role.value in ("admin", "incident_commander") %}

@@ -9,6 +9,8 @@ response. Built to run on your own infrastructure, behind your own SSO.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 
+![Incident Commander dashboard](assets/dashboard.png)
+
 > **Status — production-shaped and running today.** Local auth + RBAC + generic OIDC SSO, the full
 > configurable incident lifecycle (severities, statuses, types, roles, timeline, follow-ups, custom
 > fields), **postmortems**, **insights/analytics**, **stakeholder updates**, **inbound alerting**

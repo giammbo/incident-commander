@@ -39,6 +39,15 @@ def test_inbox_requires_login(client, db_session):
     assert client.get("/alerts", follow_redirects=False).status_code in (302, 303, 307)
 
 
+def test_inbox_renders_sidebar_when_authenticated(client, db_session):
+    # Regression: the inbox route must pass current_user so base.html renders the
+    # left sidebar nav (it was missing, leaving the page without navigation).
+    _login(client, db_session, "ic@x.io", Role.incident_commander)
+    html = client.get("/alerts").text
+    assert 'class="sidebar"' in html
+    assert 'href="/systems"' in html  # a sidebar nav link (only in the authenticated shell)
+
+
 def test_readonly_cannot_declare(client, db_session):
     a = _alert(db_session)
     _login(client, db_session, "ro@x.io", Role.read_only)

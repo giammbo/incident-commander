@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>Components</h1></div>
+<p class="page-sub">The components inside each system and how they depend on one another — the fine-grained catalogue layer.</p>
 {% set _role = effective_role(current_user) %}
 {% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
 

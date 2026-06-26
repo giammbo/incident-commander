@@ -24,11 +24,13 @@
   {# --- tabs --- #}
   <div class="tabs">
     <input class="tab-radio" type="radio" name="inc-tab" id="tab-overview" checked>
+    <input class="tab-radio" type="radio" name="inc-tab" id="tab-roles">
     <input class="tab-radio" type="radio" name="inc-tab" id="tab-timeline">
     <input class="tab-radio" type="radio" name="inc-tab" id="tab-followups">
     {% if i.alerts %}<input class="tab-radio" type="radio" name="inc-tab" id="tab-alerts">{% endif %}
     <nav class="tab-bar" role="tablist">
       <label for="tab-overview">Overview</label>
+      <label for="tab-roles">Roles</label>
       <label for="tab-timeline">Timeline</label>
       <label for="tab-followups">Follow-ups{% if followups_open %} ({{ followups_open }}){% endif %}</label>
       {% if i.alerts %}<label for="tab-alerts">Alerts</label>{% endif %}
@@ -96,31 +98,6 @@
       </dd></div>
       {% endif %}
 
-      <section class="section">
-        <h2 class="section-title">Roles</h2>
-        {% for rt in role_types %}
-        {% set _assigned = role_assignees.get(rt.id, []) %}
-        {% set _assigned_ids = _assigned | map(attribute='id') | list %}
-        <div class="role-row">
-          <span class="role-name">{{ rt.label }}</span>
-          <span class="assignees">{% if _assigned %}{{ _assigned | map(attribute='name') | join(', ') }}{% else %}<span class="muted">unassigned</span>{% endif %}</span>
-        </div>
-        {% if _can_manage %}
-        <details class="role-edit">
-          <summary>Assign</summary>
-          <form method="post" action="/incidents/{{ i.id }}/roles" style="margin-top:6px; display:flex; gap:6px; align-items:flex-start">
-            <input type="hidden" name="role_type_id" value="{{ rt.id }}">
-            <select name="user_ids" multiple size="3">
-              {% for u in assignable_users %}<option value="{{ u.id }}"{% if u.id in _assigned_ids %} selected{% endif %}>{{ u.name }}</option>{% endfor %}
-            </select>
-            <button class="btn btn-sm" type="submit">Save</button>
-          </form>
-        </details>
-        {% endif %}
-        {% endfor %}
-        {% if not role_types %}<span class="muted">No roles configured</span>{% endif %}
-      </section>
-
       {% if _can_manage %}
       <details class="section" style="margin-top:22px; padding-top:18px">
         <summary style="cursor:pointer;font-weight:600">Edit incident</summary>
@@ -172,6 +149,33 @@
         </form>
       </details>
       {% endif %}
+    </section>
+
+    <section class="tab-panel" id="panel-roles">
+      <section class="section">
+        <h2 class="section-title">Roles</h2>
+        {% for rt in role_types %}
+        {% set _assigned = role_assignees.get(rt.id, []) %}
+        {% set _assigned_ids = _assigned | map(attribute='id') | list %}
+        <div class="role-row">
+          <span class="role-name">{{ rt.label }}</span>
+          <span class="assignees">{% if _assigned %}{{ _assigned | map(attribute='name') | join(', ') }}{% else %}<span class="muted">unassigned</span>{% endif %}</span>
+        </div>
+        {% if _can_manage %}
+        <details class="role-edit">
+          <summary>Assign</summary>
+          <form method="post" action="/incidents/{{ i.id }}/roles" style="margin-top:6px; display:flex; gap:6px; align-items:flex-start">
+            <input type="hidden" name="role_type_id" value="{{ rt.id }}">
+            <select name="user_ids" multiple size="3">
+              {% for u in assignable_users %}<option value="{{ u.id }}"{% if u.id in _assigned_ids %} selected{% endif %}>{{ u.name }}</option>{% endfor %}
+            </select>
+            <button class="btn btn-sm" type="submit">Save</button>
+          </form>
+        </details>
+        {% endif %}
+        {% endfor %}
+        {% if not role_types %}<span class="muted">No roles configured</span>{% endif %}
+      </section>
     </section>
 
     <section class="tab-panel" id="panel-timeline">

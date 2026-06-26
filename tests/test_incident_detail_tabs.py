@@ -48,6 +48,8 @@ def test_detail_renders_tab_scaffold(client, db_session):
         'id="tab-overview"' in body and 'id="tab-timeline"' in body and 'id="tab-followups"' in body
     )
     assert ">Overview<" in body and ">Timeline<" in body and "Follow-ups" in body
+    # Roles is always its own tab (panel + label), not buried in Overview
+    assert 'id="tab-roles"' in body and 'id="panel-roles"' in body and ">Roles<" in body
     # content relocated into the page (timeline add-note form + respond box still present)
     assert f'action="/incidents/{inc.id}/notes"' in body
     assert f'action="/incidents/{inc.id}/updates"' in body  # Respond box always present
