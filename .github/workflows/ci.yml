@@ -34,3 +34,33 @@ jobs:
       - name: Tests
         # testcontainers spins up Postgres via Docker, which is available on GitHub-hosted runners.
         run: uv run pytest -q
+
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.4
+      - name: Install kubeconform
+        run: |
+          curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kc.tar.gz -C /usr/local/bin kubeconform
+      - name: helm lint
+        run: |
+          helm lint deploy/helm/incident-commander
+      - name: Render (external DB) + validate
+        run: |
+          helm template ic deploy/helm/incident-commander \
+            --set secrets.sessionSecret=s --set secrets.fernetKeys=k \
+            --set externalDatabase.host=db --set externalDatabase.existingSecret=db-sec \
+            | kubeconform -strict -ignore-missing-schemas -summary
+      - name: No-secret guard must fail the render
+        run: |
+          if helm template ic deploy/helm/incident-commander \
+              --set externalDatabase.host=db --set externalDatabase.existingSecret=db-sec \
+              >/dev/null 2>&1; then
+            echo "guard did not fire — render succeeded without secrets"; exit 1
+          fi
+          echo "guard OK (render failed without secrets)"

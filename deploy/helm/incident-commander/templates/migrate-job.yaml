@@ -1,0 +1,35 @@
+{{- include "ic.requireSecrets" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ic.fullname" . }}-migrate
+  labels: {{- include "ic.labels" . | nindent 4 }}
+  annotations:
+    # pre-install,pre-upgrade: the database is always external (the chart bundles none), so it
+    # exists before this hook — run migrations before the app pods start/roll, so the serve-only
+    # pods (gated by their await-db init container) come up against a migrated schema. This also
+    # keeps `helm install --wait` from deadlocking (a post-* hook would never run while the app
+    # Deployment waits on await-db).
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels: {{- include "ic.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # No serviceAccountName: this pre-install hook runs before the (non-hook) ServiceAccount
+      # exists, and migrations need no Kubernetes API access — the default SA is sufficient.
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z $DB_HOST $DB_PORT; do echo waiting for $DB_HOST:$DB_PORT; sleep 2; done"]
+          env: {{- include "ic.env" . | nindent 12 }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          env: {{- include "ic.env" . | nindent 12 }}

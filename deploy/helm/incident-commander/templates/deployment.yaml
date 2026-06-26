@@ -1,0 +1,48 @@
+{{- include "ic.requireSecrets" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ic.fullname" . }}
+  labels: {{- include "ic.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "ic.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ic.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "ic.fullname" . }}
+      initContainers:
+        - name: await-db
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["await-db"]
+          env: {{- include "ic.env" . | nindent 12 }}
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 8000
+          env: {{- include "ic.env" . | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

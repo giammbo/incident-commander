@@ -1,0 +1,11 @@
+{{ include "ic.fullname" . }} deployed.
+{{- if not .Values.ingress.enabled }}
+Port-forward to reach it:
+  kubectl port-forward svc/{{ include "ic.fullname" . }} 8000:{{ .Values.service.port }}
+{{- end }}
+The bootstrap admin password is printed once in the app logs:
+  kubectl logs deploy/{{ include "ic.fullname" . }} | grep "Generated password"
+
+{{- if .Values.ingress.enabled }}
+App URL: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- end }}

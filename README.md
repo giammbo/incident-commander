@@ -150,6 +150,37 @@ default**. No Calendar event is created. Requires a Workspace edition with the G
 (Slack is analogous: create an app at <https://api.slack.com/apps>, register
 `<BASE_URL>/connections/slack/callback`, paste the credentials into **Settings → Slack**, then connect a workspace.)
 
+## Deploy on Kubernetes (Helm)
+
+Released images and the chart are published to GHCR on each `vX.Y.Z` tag.
+
+The chart requires an **external Postgres** — it does not bundle a database.
+
+```bash
+# 1) Create the app secret (SESSION_SECRET + FERNET_KEYS — never commit real values)
+kubectl create secret generic ic-secrets \
+  --from-literal=SESSION_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
+  --from-literal=FERNET_KEYS="$(python -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')"
+
+# 2) Create the DB secret (holding the Postgres password)
+kubectl create secret generic ic-db-secret \
+  --from-literal=password=<your-postgres-password>
+
+# 3) Install
+helm install ic oci://ghcr.io/giammbo/charts/incident-commander --version <X.Y.Z> \
+  --set secrets.existingSecret=ic-secrets \
+  --set externalDatabase.host=<pg-host> \
+  --set externalDatabase.existingSecret=ic-db-secret \
+  --set config.baseUrl=https://incident.example.com \
+  --set ingress.enabled=true --set ingress.host=incident.example.com
+```
+
+The bootstrap admin password is printed once in the pod logs:
+
+```bash
+kubectl logs deploy/ic-incident-commander | grep "Generated password"
+```
+
 ## Development
 
 ```bash

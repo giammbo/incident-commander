@@ -1,0 +1,51 @@
+image:
+  repository: ghcr.io/giammbo/incident-commander
+  tag: ""           # defaults to the chart appVersion (e.g. v0.1.0)
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# --- Secrets (NEVER commit real values) ---
+# Generate:
+#   FERNET_KEYS:    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#   SESSION_SECRET: python -c "import secrets; print(secrets.token_urlsafe(48))"
+# Preferred: create a Secret yourself and set existingSecret (keys: SESSION_SECRET, FERNET_KEYS):
+#   kubectl create secret generic ic-secrets \
+#     --from-literal=SESSION_SECRET=... --from-literal=FERNET_KEYS=...
+secrets:
+  existingSecret: ""    # name of a pre-created Secret (preferred). If set, the inline values below are ignored.
+  sessionSecret: ""     # inline (quick start only — ends up in the Helm release; less safe)
+  fernetKeys: ""
+
+config:
+  baseUrl: "http://localhost:8000"
+  adminEmail: "admin@localhost"
+  sessionHttpsOnly: true     # k8s is assumed behind HTTPS
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: incident-commander.local
+  tls: []        # e.g. [{ secretName: ic-tls, hosts: [incident-commander.example.com] }]
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# --- External Postgres (required) ---
+# The chart does not bundle a database. You must provide an external Postgres.
+# Create a Secret holding the DB password, then set host and existingSecret:
+#   kubectl create secret generic ic-db-secret --from-literal=password=<pg-password>
+externalDatabase:
+  host: ""              # required — Postgres hostname or service name
+  port: 5432
+  user: ic
+  database: incident_commander
+  existingSecret: ""    # required — name of a Secret holding the DB password
+  passwordKey: password

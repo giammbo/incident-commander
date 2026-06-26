@@ -1,0 +1,5 @@
+.DS_Store
+# Note: *.tgz removed — it would block subchart tarballs in charts/.
+# Subchart tarballs (charts/*.tgz) are gitignored in the root .gitignore.
+ci/
+*.md
