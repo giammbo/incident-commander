@@ -2,8 +2,8 @@ apiVersion: v2
 name: incident-commander
 description: Open-source, self-hosted incident management (FastAPI + HTMX + Postgres)
 type: application
-version: 0.0.1
-appVersion: "v0.0.1"
+version: 0.0.2
+appVersion: "v0.0.2"
 home: https://github.com/giammbo/incident-commander
 sources:
   - https://github.com/giammbo/incident-commander
