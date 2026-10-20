@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.db import get_db
 from app.main import create_app
-from app.models import Role, WorkflowRule
+from app.models import IncidentType, Role, SeverityLevel, WorkflowRule
 from app.services.users import bootstrap_admin, create_user
 
 
@@ -91,3 +91,91 @@ def test_toggle_and_delete(client, db_session):
         follow_redirects=False,
     )
     assert db_session.scalar(select(WorkflowRule).where(WorkflowRule.id == rule.id)) is None
+
+
+def test_admin_creates_rule_from_picker_rows(client, db_session):
+    _login(client, db_session, Role.admin)
+    s1 = SeverityLevel(label="SEV1", color="#FF0000", rank=1, is_default=True)
+    s2 = SeverityLevel(label="SEV2", color="#FF8800", rank=2)
+    t = IncidentType(label="Outage", rank=1)
+    db_session.add_all([s1, s2, t])
+    db_session.flush()
+    r = client.post(
+        "/automations",
+        headers={"origin": "http://testserver"},
+        follow_redirects=False,
+        data={
+            "name": "picker",
+            "trigger": "incident.opened",
+            # multi-select "is one of", an unchecked is_private checkbox, a blank row
+            "cond-0-field": "severity",
+            "cond-0-op": "in",
+            "cond-0-value": [str(s1.id), str(s2.id)],
+            "cond-1-field": "is_private",
+            "cond-1-op": "equals",
+            "cond-2-field": "",
+            "action_type": "post_update",
+            "ap_message": "hi",
+        },
+    )
+    assert r.status_code == 303
+    rule = db_session.scalar(select(WorkflowRule).where(WorkflowRule.name == "picker"))
+    assert rule.conditions == [
+        {"field": "severity", "op": "in", "value": [s1.id, s2.id]},
+        {"field": "is_private", "op": "equals", "value": False},
+    ]
+    assert rule.actions == [{"type": "post_update", "params": {"message": "hi"}}]
+
+
+def test_picker_rows_for_alert_trigger(client, db_session):
+    _login(client, db_session, Role.admin)
+    client.post(
+        "/automations",
+        headers={"origin": "http://testserver"},
+        follow_redirects=False,
+        data={
+            "name": "alerts",
+            "trigger": "alert.received",
+            "cond-0-field": "severity_raw",
+            "cond-0-op": "in",
+            "cond-0-value": "critical, high",
+            "cond-1-field": "status",
+            "cond-1-op": "equals",
+            "cond-1-value": "firing",
+            "cond-2-field": "source",
+            "cond-2-op": "equals",
+            "cond-2-value": "  ",  # blank text value → row skipped
+            "action_type": "create_incident",
+        },
+    )
+    rule = db_session.scalar(select(WorkflowRule).where(WorkflowRule.name == "alerts"))
+    assert rule.conditions == [
+        {"field": "severity_raw", "op": "in", "value": ["critical", "high"]},
+        {"field": "status", "op": "equals", "value": "firing"},
+    ]
+
+
+def test_picker_field_not_allowed_for_trigger_rejected(client, db_session):
+    _login(client, db_session, Role.admin)
+    client.post(
+        "/automations",
+        headers={"origin": "http://testserver"},
+        follow_redirects=False,
+        data={
+            "name": "wrong",
+            "trigger": "alert.received",
+            "cond-0-field": "is_private",
+            "cond-0-value": "true",
+            "action_type": "create_incident",
+        },
+    )
+    assert db_session.scalar(select(WorkflowRule).where(WorkflowRule.name == "wrong")) is None
+
+
+def test_builder_and_value_partials_require_admin(client, db_session):
+    _login(client, db_session, Role.incident_commander)
+    for url in (
+        "/automations/builder?trigger=alert.received",
+        "/automations/condition-value?i=0&cond-0-field=severity",
+    ):
+        assert client.get(url, follow_redirects=False).status_code == 403

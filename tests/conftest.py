@@ -74,3 +74,24 @@ def get_db_override(db_session):
             db_session.commit()
 
     return _override
+
+
+@pytest.fixture
+def webhook_posts(monkeypatch):
+    """Deliver outgoing webhooks inline (not on the background pool) and capture
+    each request as (url, decoded JSON body)."""
+    import json
+
+    import httpx
+
+    import app.services.webhooks as wh
+
+    posts = []
+
+    def fake_post(url, content=None, headers=None, timeout=None):
+        posts.append((url, json.loads(content)))
+        return httpx.Response(200)
+
+    monkeypatch.setattr(wh, "_http_post", fake_post)
+    monkeypatch.setattr(wh, "_dispatch", wh.deliver)
+    return posts

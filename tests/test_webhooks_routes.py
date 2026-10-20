@@ -1,3 +1,7 @@
+import threading
+import time
+
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -51,7 +55,7 @@ def test_readonly_cannot_manage_webhooks(client, db_session):
     )
 
 
-def test_creating_incident_fires_webhook(client, db_session, monkeypatch):
+def test_creating_incident_fires_webhook(client, db_session, webhook_posts):
     bootstrap_admin(db_session, "admin@localhost")
     create_user(
         db_session, email="ic@x.io", name="IC", role=Role.incident_commander, password="pw-123456"
@@ -61,20 +65,65 @@ def test_creating_incident_fires_webhook(client, db_session, monkeypatch):
         [lvl, Webhook(name="W", url="https://hooks/x", format="slack", enabled=True)]
     )
     db_session.flush()
-    posts = []
-    monkeypatch.setattr(
-        wh,
-        "httpx",
-        type(
-            "H",
-            (),
-            {"post": staticmethod(lambda url, json=None, timeout=None: posts.append((url, json)))},
-        ),
-    )
     client.post("/login", data={"email": "ic@x.io", "password": "pw-123456"})
     client.post(
         "/incidents",
         data={"title": "Boom", "severity_level_id": str(lvl.id)},
         headers={"HX-Request": "true"},
     )
-    assert posts and any("Boom" in (j.get("text") or "") for _, j in posts)
+    assert webhook_posts and any("Boom" in (j.get("text") or "") for _, j in webhook_posts)
+
+
+def test_route_response_does_not_wait_for_webhooks(client, db_session, monkeypatch):
+    # The delivery is parked on an Event: if the route waited for it, the request
+    # would hang until the 5s wait times out instead of returning straight away.
+    bootstrap_admin(db_session, "admin@localhost")
+    create_user(
+        db_session, email="ic@x.io", name="IC", role=Role.incident_commander, password="pw-123456"
+    )
+    lvl = SeverityLevel(label="SEV1", color="#FF5D5D", rank=1, is_default=True)
+    db_session.add_all(
+        [lvl, Webhook(name="W", url="https://hooks/slow", format="slack", enabled=True)]
+    )
+    db_session.flush()
+    release, started, done = threading.Event(), threading.Event(), threading.Event()
+
+    def slow_post(url, **kwargs):
+        started.set()
+        release.wait(5)
+        done.set()
+        return httpx.Response(200)
+
+    monkeypatch.setattr(wh, "_http_post", slow_post)
+    client.post("/login", data={"email": "ic@x.io", "password": "pw-123456"})
+    t0 = time.monotonic()
+    r = client.post(
+        "/incidents",
+        data={"title": "Slow hook", "severity_level_id": str(lvl.id)},
+        headers={"HX-Request": "true"},
+    )
+    elapsed = time.monotonic() - t0
+    assert r.status_code == 200
+    assert started.wait(2), "webhook delivery never started"
+    assert not done.is_set() and elapsed < 4, "response waited for the webhook"
+    release.set()
+    assert done.wait(2)
+
+
+def test_admin_creates_signed_webhook(client, db_session):
+    _admin(client, db_session)
+    client.post(
+        "/settings/webhooks",
+        data={"name": "Signed", "url": "https://hooks/s", "format": "generic", "secret": " k3y "},
+        follow_redirects=False,
+    )
+    client.post(
+        "/settings/webhooks",
+        data={"name": "Plain", "url": "https://hooks/p", "format": "generic", "secret": "  "},
+        follow_redirects=False,
+    )
+    signed = db_session.scalar(select(Webhook).where(Webhook.name == "Signed"))
+    plain = db_session.scalar(select(Webhook).where(Webhook.name == "Plain"))
+    assert signed.secret == "k3y" and plain.secret is None
+    page = client.get("/settings").text
+    assert "k3y" not in page  # the secret is write-only

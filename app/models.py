@@ -429,6 +429,8 @@ class Webhook(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     url: Mapped[str] = mapped_column(EncryptedString)
+    # optional HMAC-SHA256 signing key; deliveries carry X-IC-Signature when set
+    secret: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     format: Mapped[WebhookFormat] = mapped_column(
         Enum(WebhookFormat, name="webhook_format"), default=WebhookFormat.generic
     )

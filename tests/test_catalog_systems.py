@@ -145,3 +145,71 @@ def test_delete_system_blocked_when_referenced_by_incident(db_session):
     db_session.flush()
     with pytest.raises(ValueError):
         delete_system(db_session, s.id)
+
+
+def test_component_direct_cycle_rejected(db_session):
+    s = create_system(db_session, name="S1")
+    a = create_component(db_session, name="A", system_id=s.id)
+    b = create_component(db_session, name="B", system_id=s.id)
+    set_component_dependencies(db_session, a, [b.id])
+    with pytest.raises(ValueError, match="B → A → B"):
+        set_component_dependencies(db_session, b, [a.id])
+    assert b.depends_on == []
+
+
+def test_component_indirect_cycle_rejected(db_session):
+    s = create_system(db_session, name="S1")
+    a = create_component(db_session, name="A", system_id=s.id)
+    b = create_component(db_session, name="B", system_id=s.id)
+    c = create_component(db_session, name="C", system_id=s.id)
+    set_component_dependencies(db_session, a, [b.id])
+    set_component_dependencies(db_session, b, [c.id])
+    with pytest.raises(ValueError, match="C → A → B → C"):
+        set_component_dependencies(db_session, c, [a.id])
+
+
+def test_replacing_edges_is_judged_on_the_new_set(db_session):
+    # A -> B. Replacing A's deps with [] and then B -> A is fine (no loop any more).
+    s = create_system(db_session, name="S1")
+    a = create_component(db_session, name="A", system_id=s.id)
+    b = create_component(db_session, name="B", system_id=s.id)
+    set_component_dependencies(db_session, a, [b.id])
+    set_component_dependencies(db_session, a, [])
+    set_component_dependencies(db_session, b, [a.id])
+    assert [x.name for x in b.depends_on] == ["A"]
+
+
+def test_diamond_is_not_a_cycle(db_session):
+    s = create_system(db_session, name="S1")
+    a, b, c, d = (create_component(db_session, name=n, system_id=s.id) for n in "ABCD")
+    set_component_dependencies(db_session, a, [b.id, c.id])
+    set_component_dependencies(db_session, b, [d.id])
+    set_component_dependencies(db_session, c, [d.id])
+    assert sorted(x.name for x in a.depends_on) == ["B", "C"]
+
+
+def test_system_cycle_rejected(db_session):
+    s1 = create_system(db_session, name="S1")
+    s2 = create_system(db_session, name="S2")
+    s3 = create_system(db_session, name="S3")
+    set_system_dependencies(db_session, s1, [s2.id])
+    set_system_dependencies(db_session, s2, [s3.id])
+    with pytest.raises(ValueError, match="dependency loop"):
+        set_system_dependencies(db_session, s3, [s1.id])
+    assert s3.depends_on == []
+
+
+def test_dependency_view_used_by_and_blocked(db_session):
+    from app.services.catalog import dependency_view
+
+    s = create_system(db_session, name="S1")
+    a, b, c, d = (create_component(db_session, name=n, system_id=s.id) for n in "ABCD")
+    set_component_dependencies(db_session, a, [b.id])
+    set_component_dependencies(db_session, b, [c.id])
+    view = dependency_view([a, b, c, d])
+    assert [x.name for x in view["used_by"][c.id]] == ["B"]
+    assert view["used_by"][a.id] == []
+    # C can't depend on A or B (both already depend on C); D is free.
+    assert view["blocked"][c.id] == {a.id, b.id}
+    assert view["blocked"][a.id] == set()
+    assert view["blocked"][d.id] == set()

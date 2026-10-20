@@ -1,0 +1,3 @@
+{# HTMX response for declare/close on the board: the row plus an out-of-band refresh of the counter. #}
+{% include "partials/incident_row.html" %}
+{% with oob=True %}{% include "partials/incident_stats.html" %}{% endwith %}

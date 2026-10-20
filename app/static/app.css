@@ -311,6 +311,12 @@ label { color: var(--ink-2); }
 .auth-card .field span { display: block; margin-bottom: 6px; color: var(--ink-2); font-size: 12.5px; }
 .auth-card input { width: 100%; }
 .auth-card .btn { width: 100%; justify-content: center; margin-top: 6px; }
+.auth-or {
+  display: flex; align-items: center; gap: 10px; margin: 16px 0 10px;
+  color: var(--ink-3); font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: .12em; text-transform: uppercase;
+}
+.auth-or::before, .auth-or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 
 .alert {
   border: 1px solid color-mix(in oklab, var(--sev1) 40%, transparent); background: var(--sev1-soft);
@@ -334,6 +340,8 @@ label { color: var(--ink-2); }
 .form-row .grow { flex: 1 1 200px; min-width: 0; }
 .field-block { display: block; margin-bottom: 12px; }
 .field-block span { display: block; margin-bottom: 6px; color: var(--ink-2); font-size: 12.5px; }
+.integ-mapping { margin: 4px 0 14px; }
+.integ-mapping summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }
 select[multiple] { padding: 6px; min-width: 170px; background: var(--surface-2); }
 select[multiple] option { padding: 4px 8px; border-radius: 4px; color: var(--ink); }
 select[multiple] option:checked { background: var(--accent-soft); color: #fff; }
@@ -493,3 +501,41 @@ select[multiple] option:checked { background: var(--accent-soft); color: #fff; }
 #tab-alerts:focus-visible    ~ .tab-bar label[for="tab-alerts"] { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* the panel's first .section has a redundant top divider under the tab bar */
 .tab-panel > .section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+
+/* ---------- Dependency editor (components / systems) ---------- */
+.dep-cell { min-width: 220px; }
+.dep-usedby { color: var(--ink-3); font-size: 12.5px; margin-top: 3px; }
+.dep-edit { margin-top: 6px; }
+.dep-edit > summary {
+  cursor: pointer; color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 11.5px; list-style: none; display: inline-block;
+}
+.dep-edit > summary::-webkit-details-marker { display: none; }
+.dep-edit > summary::before { content: "✎ "; }
+.dep-edit > summary:hover, .dep-edit[open] > summary { color: var(--accent); }
+.dep-picker {
+  margin-top: 8px; padding: 10px 12px; max-width: 360px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.dep-picker-head { margin: 0 0 8px; font-size: 12.5px; color: var(--ink-2); }
+.dep-opt {
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 2px;
+  color: var(--ink); cursor: pointer; flex-wrap: wrap;
+}
+.dep-opt input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; align-self: center; }
+.dep-opt-blocked { color: var(--ink-3); cursor: not-allowed; }
+.dep-why { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+.dep-why::before { content: "↺ "; }
+.dep-picker .btn { margin-top: 8px; }
+
+/* ---------- Automation rules ---------- */
+.rule-summary { margin-top: 5px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.rule-row .inc-title { white-space: normal; }
+.rule-editor .cond-row { margin-bottom: 8px; }
+.rule-editor .cond-value { display: inline-flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.rule-editor .cond-value:empty { display: none; }
+.rule-editor .check {
+  display: inline-flex; align-items: center; gap: 7px; color: var(--ink-2);
+  cursor: pointer; font-size: 13px;
+}
+.rule-editor .check input { accent-color: var(--accent); width: 15px; height: 15px; }

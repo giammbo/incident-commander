@@ -68,3 +68,56 @@ def test_component_options_endpoint_filters_by_system(client, db_session):
     db_session.flush()
     r = client.get(f"/incidents/component-options?system_id={s1.id}")
     assert "Alpha" in r.text and "Beta" not in r.text
+
+
+def _ab_components(db_session):
+    from app.services.catalog import create_component, create_system, set_component_dependencies
+
+    s = create_system(db_session, name="Shop")
+    a = create_component(db_session, name="api", system_id=s.id)
+    b = create_component(db_session, name="db", system_id=s.id)
+    set_component_dependencies(db_session, a, [b.id])
+    db_session.flush()
+    return a, b
+
+
+def test_component_cycle_rejected_with_flash(client, db_session):
+    _login(client, db_session, role="ic")
+    a, b = _ab_components(db_session)
+    r = client.post(
+        f"/components/{b.id}/deps", data={"depends_on_ids": [str(a.id)]}, follow_redirects=False
+    )
+    assert r.status_code == 303
+    from sqlalchemy import select
+
+    from app.models import component_dependencies
+
+    edges = db_session.execute(
+        select(component_dependencies).where(component_dependencies.c.component_id == b.id)
+    ).all()
+    assert edges == []
+    page = client.get("/components").text
+    assert "dependency loop: db → api → db" in page
+
+
+def test_components_page_disables_loop_options_and_shows_used_by(client, db_session):
+    _login(client, db_session, role="ic")
+    a, b = _ab_components(db_session)
+    page = client.get("/components").text
+    assert "<strong>db</strong> depends on:" in page
+    assert f'value="{a.id}" disabled' in page  # db can't pick api: api already depends on db
+    assert "already depends on db" in page
+    assert "used by api" in page
+
+
+def test_system_detail_dependency_picker(client, db_session):
+    from app.services.catalog import create_system, set_system_dependencies
+
+    _login(client, db_session, role="ic")
+    s1 = create_system(db_session, name="Front")
+    s2 = create_system(db_session, name="Back")
+    set_system_dependencies(db_session, s1, [s2.id])
+    db_session.flush()
+    page = client.get(f"/systems/{s2.id}").text
+    assert "used by Front" in page
+    assert f'value="{s1.id}" disabled' in page

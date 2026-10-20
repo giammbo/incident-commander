@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/dep_picker.html" import dep_picker %}
 {% block content %}
 <div class="page-head"><h1>{{ s.name }}</h1></div>
 {% set _role = effective_role(current_user) %}
@@ -14,17 +15,16 @@
 </div>
 
 <div class="card">
-  <h2>Depends on (other systems)</h2>
-  {% if can_manage %}
-  <form method="post" action="/systems/{{ s.id }}/deps">
-    <select name="depends_on_ids" multiple size="5" style="min-width:220px">
-      {% for o in other_systems %}<option value="{{ o.id }}"{% if o in s.depends_on %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
-    </select>
-    <div style="margin-top:10px"><button class="btn" type="submit">Save dependencies</button></div>
-  </form>
-  {% else %}
-  <p class="muted">{{ s.depends_on | map(attribute='name') | join(', ') or '—' }}</p>
-  {% endif %}
+  <h2>Dependencies</h2>
+  <div class="dep-cell">
+    {% if s.depends_on %}<div>{{ s.name }} depends on → {{ s.depends_on | map(attribute='name') | sort | join(', ') }}</div>
+    {% else %}<div class="muted">{{ s.name }} doesn't depend on other systems.</div>{% endif %}
+    {% if used_by %}<div class="dep-usedby">used by {{ used_by | map(attribute='name') | join(', ') }}</div>{% endif %}
+    {% if can_manage %}
+      {% if other_systems %}{{ dep_picker("/systems/" ~ s.id ~ "/deps", s, other_systems, blocked) }}
+      {% else %}<div class="dep-usedby">No other systems to depend on yet.</div>{% endif %}
+    {% endif %}
+  </div>
 </div>
 
 {% if can_manage %}

@@ -9,15 +9,54 @@ from app.auth import require_role
 from app.db import get_db
 from app.models import Role, User
 from app.services import automation
+from app.services import automation_editor as editor
 from app.templating import templates
 
 router = APIRouter()
+
+
+@router.get("/automations/builder", response_class=HTMLResponse)
+def builder(
+    request: Request,
+    trigger: str = "",
+    user: User = Depends(require_role(Role.admin)),
+):
+    """Condition rows + action picker allowed for the chosen trigger (HTMX swap)."""
+    return templates.TemplateResponse(
+        request, "partials/automation_builder.html", editor.editor_context(trigger)
+    )
+
+
+@router.get("/automations/condition-value", response_class=HTMLResponse)
+def condition_value(
+    request: Request,
+    i: int = 0,
+    user: User = Depends(require_role(Role.admin)),
+    db: Session = Depends(get_db),
+):
+    """Operator + value widget for condition row ``i`` once its field/op is picked."""
+    q = request.query_params
+    field = q.get(f"cond-{i}-field", "")
+    op = q.get(f"cond-{i}-op", "equals")
+    return templates.TemplateResponse(
+        request,
+        "partials/automation_condition_value.html",
+        {
+            "i": i,
+            "field": field,
+            "op": op if op in editor.OP_LABELS else "equals",
+            "op_labels": editor.OP_LABELS,
+            "options": editor.field_options(db, field) if field else None,
+            "selected": [v for v in q.getlist(f"cond-{i}-value") if v],
+        },
+    )
 
 
 @router.get("/automations/action-params", response_class=HTMLResponse)
 def action_params(
     request: Request,
     type: str = "",
+    action_type: str = "",  # what the editor's <select name="action_type"> actually sends
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
@@ -27,7 +66,7 @@ def action_params(
 
     ctx = {
         "request": request,
-        "action_type": type,
+        "action_type": type or action_type,
         "statuses": list(db.scalars(select(StatusLevel).order_by(StatusLevel.rank))),
         "severities": list(db.scalars(select(SeverityLevel).order_by(SeverityLevel.rank))),
         "incident_types": list_incident_types(db),
@@ -45,20 +84,23 @@ def action_params(
 def index(
     request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
+    rules = automation.list_rules(db)
+    lookups = editor.load_lookups(db)
     return templates.TemplateResponse(
         request,
         "automations.html",
         {
             "current_user": user,
-            "rules": automation.list_rules(db),
-            "trigger_fields": automation.TRIGGER_FIELDS,
-            "trigger_actions": automation.TRIGGER_ACTIONS,
+            "rules": rules,
+            "summaries": {r.id: editor.summarize_rule(r, lookups) for r in rules},
+            "trigger_labels": editor.TRIGGER_LABELS,
+            **editor.editor_context(""),
         },
     )
 
 
 @router.post("/automations")
-def create(
+async def create(
     request: Request,
     name: str = Form(...),
     trigger: str = Form(...),
@@ -78,26 +120,15 @@ def create(
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
-    conditions = []
+    # The editor posts indexed rows (cond-<i>-field|op|value); the older parallel
+    # cond_field/cond_op/cond_value lists are still accepted for API callers.
+    conditions = editor.conditions_from_form(await request.form())
     for f, op, v in zip(cond_field, cond_op, cond_value):
-        f = (f or "").strip()
-        if not f or not (v or "").strip():
+        if not (v or "").strip():
             continue  # skip blank rows — also guards int("") on a blank _INT_FIELDS value
-        op = op or "equals"
-        if op == "in":
-            parts = [p.strip() for p in (v or "").split(",") if p.strip()]
-            value: object = (
-                [int(p) for p in parts if p.lstrip("-").isdigit()]
-                if f in automation._INT_FIELDS
-                else parts
-            )
-        elif f in automation._INT_FIELDS:
-            value = int(v) if v.strip().lstrip("-").isdigit() else None
-        elif f == "is_private":
-            value = (v or "").lower() in ("true", "1", "on", "yes")
-        else:
-            value = v
-        conditions.append({"field": f, "op": op, "value": value})
+        cond = editor.build_condition(f, op, v.split(",") if op == "in" else [v])
+        if cond is not None:
+            conditions.append(cond)
     # v1: one action per rule (the no-JS editor has a single action block)
     params: dict = {}
     if action_type == "set_status":

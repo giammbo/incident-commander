@@ -9,11 +9,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db import get_db
 from app.models import Alert, InboundIntegration
 from app.services import alert_adapters as adapters
 from app.services import alerts as alerts_service
-from app.services import automation
+from app.services import automation, webhooks
 
 router = APIRouter()
 
@@ -56,6 +57,7 @@ async def ingest(token: str, request: Request, db: Session = Depends(get_db)):
             normalized = adapters.parse_generic(body, integ.settings or {})
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    created = []
     for n in normalized:
         prior_status = db.scalar(
             select(Alert.status).where(
@@ -64,6 +66,10 @@ async def ingest(token: str, request: Request, db: Session = Depends(get_db)):
         )
         alert = alerts_service.ingest_alert(db, integ, n)
         if alert.status == "firing" and prior_status in (None, "resolved"):
-            automation.run_rules(db, trigger="alert.received", alert=alert, by_user=None)
+            created += automation.run_rules(db, trigger="alert.received", alert=alert, by_user=None)
     db.commit()
+    # "opened" webhook for incidents auto-created by alert rules, after the commit
+    # (as POST /incidents does); notify is best-effort, so ingest never 500s on it.
+    for inc in created:
+        webhooks.notify(db, inc, "opened", base_url=get_settings().base_url)
     return JSONResponse({"ok": "ingested", "count": len(normalized)})

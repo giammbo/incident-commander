@@ -33,6 +33,32 @@ from app.templating import templates
 
 router = APIRouter()
 
+# Tabs on the incident detail page (CSS radio tabs, no JS). POST routes redirect
+# back to the tab the form lives in via `?tab=`; anything off this list is ignored.
+INCIDENT_TABS = ("overview", "roles", "timeline", "followups", "alerts")
+
+
+def _board_row_response(request: Request, user: User, db: Session, inc: Incident):
+    """HTMX row for the board plus an OOB refresh of the open/total counter."""
+    incidents = list_incidents(db)
+    return templates.TemplateResponse(
+        request,
+        "partials/incident_row_oob.html",
+        {
+            "current_user": user,
+            "i": inc,
+            "open_count": sum(1 for x in incidents if not x.is_closed),
+            "total_count": len(incidents),
+        },
+    )
+
+
+def incident_redirect(incident_id: int, return_tab: str | None = None) -> RedirectResponse:
+    url = f"/incidents/{incident_id}"
+    if return_tab in INCIDENT_TABS:
+        url += f"?tab={return_tab}"
+    return RedirectResponse(url, status_code=303)
+
 
 @router.get("/", response_class=HTMLResponse)
 def history(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
@@ -133,9 +159,7 @@ async def create(
     db.commit()
     webhooks.notify(db, inc, "opened", base_url=get_settings().base_url)
     if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request, "partials/incident_row.html", {"current_user": user, "i": inc}
-        )
+        return _board_row_response(request, user, db, inc)
     return RedirectResponse("/", status_code=303)
 
 
@@ -189,6 +213,7 @@ def type_options(
 async def edit_custom_fields(
     request: Request,
     incident_id: int,
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -203,13 +228,14 @@ async def edit_custom_fields(
     if missing:
         request.session["flash"] = "Missing required: " + ", ".join(missing)
     db.commit()
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.get("/incidents/{incident_id}", response_class=HTMLResponse)
 def detail(
     request: Request,
     incident_id: int,
+    tab: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -244,6 +270,9 @@ def detail(
 
     custom_fields = fields_for_type(db, inc.incident_type_id)
     custom_values = values_for_incident(inc)
+    active_tab = tab if tab in INCIDENT_TABS else "overview"
+    if active_tab == "alerts" and not inc.alerts:
+        active_tab = "overview"
     return templates.TemplateResponse(
         request,
         "incident_detail.html",
@@ -264,6 +293,7 @@ def detail(
             "incident_types": incident_types,
             "custom_fields": custom_fields,
             "custom_values": custom_values,
+            "active_tab": active_tab,
         },
     )
 
@@ -278,6 +308,7 @@ def edit(
     system_id: int | None = Form(None),
     component_ids: list[int] = Form(default=[]),
     incident_type_id: int | None = Form(None),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -298,7 +329,7 @@ def edit(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     if inc.slack_connection_id and inc.slack_channel_id:
         from app.services import providers
 
@@ -309,7 +340,7 @@ def edit(
             providers.CHAT_PROVIDERS["slack"].post_update(db, inc, connection=conn)
     db.commit()
     webhooks.notify(db, inc, "updated", base_url=get_settings().base_url)
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/add-meet")
@@ -317,6 +348,7 @@ def add_meet(
     request: Request,
     incident_id: int,
     video: str = Form(...),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -327,15 +359,15 @@ def add_meet(
         return HTMLResponse("Not found", status_code=404)
     if inc.is_closed:
         request.session["flash"] = "Cannot add a video bridge to a closed incident."
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     if inc.meet_url:
         request.session["flash"] = "This incident already has a video bridge."
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     vkey = providers.parse_video_choice(video)
     vp = providers.VIDEO_PROVIDERS.get(vkey) if vkey else None
     if vp is None:
         request.session["flash"] = "Unknown video provider."
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     vp.create(db, inc, connection=None)
     if inc.meet_url and inc.slack_channel_id:
         sconn = db.scalar(
@@ -352,7 +384,7 @@ def add_meet(
 
         log_event(db, inc, entry_type="video_added", body="Video bridge added.", created_by=user.id)
     db.commit()
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/open-slack")
@@ -360,6 +392,7 @@ def open_slack(
     request: Request,
     incident_id: int,
     slack_connection_id: int = Form(...),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -368,14 +401,14 @@ def open_slack(
         return HTMLResponse("Not found", status_code=404)
     if inc.is_closed:
         request.session["flash"] = "Cannot open a channel for a closed incident."
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     if inc.slack_channel_id:
         request.session["flash"] = "This incident already has a Slack channel."
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     sconn = db.scalar(select(SlackConnection).where(SlackConnection.id == slack_connection_id))
     if sconn is None:
         request.session["flash"] = "Unknown Slack connection."
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     from app.services import providers
 
     inc.slack_connection_id = sconn.id
@@ -395,7 +428,7 @@ def open_slack(
             created_by=user.id,
         )
     db.commit()
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/close")
@@ -425,9 +458,7 @@ def close(
             pass
         db.commit()
     if request.headers.get("HX-Request"):
-        return templates.TemplateResponse(
-            request, "partials/incident_row.html", {"current_user": user, "i": inc}
-        )
+        return _board_row_response(request, user, db, inc)
     return RedirectResponse("/", status_code=303)
 
 
@@ -437,6 +468,7 @@ def set_roles(
     incident_id: int,
     role_type_id: int = Form(...),
     user_ids: list[int] = Form(default=[]),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -452,7 +484,7 @@ def set_roles(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     if inc.slack_connection_id and inc.slack_channel_id:
         from app.services import providers
 
@@ -463,7 +495,7 @@ def set_roles(
             providers.CHAT_PROVIDERS["slack"].post_update(db, inc, connection=conn)
     db.commit()
     webhooks.notify(db, inc, "updated", base_url=get_settings().base_url)
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/notes")
@@ -471,6 +503,7 @@ def add_note_route(
     request: Request,
     incident_id: int,
     body: str = Form(...),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -484,9 +517,9 @@ def add_note_route(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     db.commit()
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/events/{event_id}/pin")
@@ -494,6 +527,7 @@ def pin_event_route(
     request: Request,
     incident_id: int,
     event_id: int,
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -505,7 +539,7 @@ def pin_event_route(
         return HTMLResponse("Not found", status_code=404)
     toggle_pin(db, event_id)
     db.commit()
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/events/{event_id}/delete")
@@ -513,6 +547,7 @@ def delete_event_route(
     request: Request,
     incident_id: int,
     event_id: int,
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -528,7 +563,7 @@ def delete_event_route(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/updates")
@@ -537,6 +572,7 @@ def post_update_route(
     incident_id: int,
     message: str = Form(...),
     status_id: int | None = Form(None),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -550,7 +586,7 @@ def post_update_route(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     if inc.slack_connection_id and inc.slack_channel_id:
         from app.services import providers
 
@@ -573,7 +609,7 @@ def post_update_route(
         webhooks.notify(
             db, inc, "closed" if kind == "closed" else "updated", base_url=get_settings().base_url
         )
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/incidents/{incident_id}/status")
@@ -581,6 +617,7 @@ def change_status(
     request: Request,
     incident_id: int,
     status_id: int = Form(...),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -592,7 +629,7 @@ def change_status(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-        return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+        return incident_redirect(incident_id, return_tab)
     from app.services import providers
 
     if inc.slack_connection_id and inc.slack_channel_id:
@@ -611,4 +648,4 @@ def change_status(
         db, inc, "closed" if kind == "closed" else "updated", base_url=get_settings().base_url
     )
     db.commit()
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)

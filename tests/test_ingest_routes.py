@@ -79,3 +79,45 @@ def test_sns_non_aws_subscribe_url_skips_get(client, db_session, monkeypatch):
     r = client.post("/ingest/sns-2", json=env)
     assert r.status_code == 200
     assert get_calls == [], "httpx.get must NOT be called for non-AWS SubscribeURL"
+
+
+def test_generic_ingest_end_to_end_with_mapping_from_settings(client, db_session):
+    """Admin configures the generic mapper in Settings; ingest then accepts the payload."""
+    from app.models import Role
+    from app.services.users import bootstrap_admin, create_user
+
+    bootstrap_admin(db_session, "admin@localhost")
+    create_user(db_session, email="adm@x.io", name="A", role=Role.admin, password="pw-123456")
+    db_session.commit()
+    client.post("/login", data={"email": "adm@x.io", "password": "pw-123456"})
+    integ = _integ(db_session, kind="generic", token="gen-e2e")
+    body = {"alert": {"id": "chk-42", "name": "Checkout 5xx", "level": "critical", "state": "open"}}
+
+    # unconfigured: the mapper cannot find a dedup key
+    assert client.post("/ingest/gen-e2e", json=body).status_code == 400
+
+    r = client.post(
+        f"/settings/integrations/{integ.id}/settings",
+        data={
+            "dedup_key": "alert.id",
+            "title": "alert.name",
+            "status": "alert.state",
+            "severity": "alert.level",
+            "resolved_value": "closed",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+
+    r = client.post("/ingest/gen-e2e", json=body)
+    assert r.status_code == 200
+    alert = db_session.scalar(select(Alert).where(Alert.dedup_key == "chk-42"))
+    assert alert is not None
+    assert alert.title == "Checkout 5xx" and alert.status == "firing"
+    assert alert.integration_id == integ.id
+
+    # the configured resolved_value resolves the same alert
+    body["alert"]["state"] = "closed"
+    assert client.post("/ingest/gen-e2e", json=body).status_code == 200
+    db_session.expire_all()
+    assert db_session.scalar(select(Alert).where(Alert.dedup_key == "chk-42")).status == "resolved"

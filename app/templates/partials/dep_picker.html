@@ -1,0 +1,25 @@
+{# Dependency editor shared by Components and System detail.
+   A checkbox per candidate, labelled with the direction ("<subject> depends on:").
+   Candidates in `blocked` already depend on the subject (directly or through others),
+   so picking them would close a loop: they render disabled with the reason. A blocked
+   candidate that is already checked (a loop saved before cycles were rejected) stays
+   enabled so it can be unticked. #}
+{% macro dep_picker(action, subject, candidates, blocked, open=False) %}
+<details class="dep-edit"{% if open %} open{% endif %}>
+  <summary>Edit dependencies</summary>
+  <form method="post" action="{{ action }}" class="dep-picker">
+    <p class="dep-picker-head"><strong>{{ subject.name }}</strong> depends on:</p>
+    {% set _sel = subject.depends_on | map(attribute='id') | list %}
+    {% for o in candidates %}
+    {% set _on = o.id in _sel %}
+    {% set _loop = o.id in blocked and not _on %}
+    <label class="dep-opt{% if _loop %} dep-opt-blocked{% endif %}">
+      <input type="checkbox" name="depends_on_ids" value="{{ o.id }}"{% if _on %} checked{% endif %}{% if _loop %} disabled{% endif %}>
+      <span>{{ o.name }}</span>
+      {% if _loop %}<span class="dep-why">already depends on {{ subject.name }}</span>{% endif %}
+    </label>
+    {% endfor %}
+    <button class="btn btn-sm" type="submit">Save dependencies</button>
+  </form>
+</details>
+{% endmacro %}

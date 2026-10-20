@@ -117,9 +117,61 @@ def update_system(
     db.flush()
 
 
+def _find_cycle(node, new_targets) -> list | None:
+    """Return the loop `node -> ... -> node` that giving `node` these dependencies would
+    close (as a list of nodes), or None. Works for System and Component alike: it only
+    walks `.depends_on`, with `node`'s own edges replaced by `new_targets`."""
+    stack = [(t, [node, t]) for t in new_targets]
+    seen: set[int] = set()
+    while stack:
+        cur, path = stack.pop()
+        if cur.id == node.id:
+            return path
+        if cur.id in seen:
+            continue
+        seen.add(cur.id)
+        for d in new_targets if cur.id == node.id else cur.depends_on:
+            stack.append((d, [*path, d]))
+    return None
+
+
+def _reject_cycle(node, targets) -> None:
+    path = _find_cycle(node, targets)
+    if path:
+        raise ValueError("That would create a dependency loop: " + " → ".join(n.name for n in path))
+
+
+def dependency_view(items) -> dict:
+    """For the dependency editors: who depends on each item directly (`used_by`) and,
+    per item, which other items it can't depend on because they already depend on it,
+    directly or indirectly (`blocked` — picking one would close a loop)."""
+    used_by: dict[int, list] = {i.id: [] for i in items}
+    for i in items:
+        for d in i.depends_on:
+            if d.id in used_by:
+                used_by[d.id].append(i)
+    blocked: dict[int, set[int]] = {}
+    for i in items:
+        seen: set[int] = set()
+        frontier = [i.id]
+        while frontier:
+            cur = frontier.pop()
+            for parent in used_by.get(cur, []):
+                if parent.id not in seen:
+                    seen.add(parent.id)
+                    frontier.append(parent.id)
+        seen.discard(i.id)
+        blocked[i.id] = seen
+    for lst in used_by.values():
+        lst.sort(key=lambda x: x.name.lower())
+    return {"used_by": used_by, "blocked": blocked}
+
+
 def set_system_dependencies(db: Session, system: System, depends_on_ids: list[int]) -> None:
     ids = [i for i in depends_on_ids if i != system.id]
-    system.depends_on = list(db.scalars(select(System).where(System.id.in_(ids)))) if ids else []
+    targets = list(db.scalars(select(System).where(System.id.in_(ids)))) if ids else []
+    _reject_cycle(system, targets)
+    system.depends_on = targets
     db.flush()
 
 
@@ -203,6 +255,7 @@ def set_component_dependencies(
     for t in targets:
         if t.system_id != component.system_id:
             raise ValueError("Components can only depend on components in the same system")
+    _reject_cycle(component, targets)
     component.depends_on = targets
     db.flush()
 

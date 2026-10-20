@@ -6,9 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_role, require_user
+from app.config import get_settings
 from app.db import get_db
 from app.models import Alert, Incident, Role, User
 from app.services import alerts as alerts_service
+from app.services import automation, webhooks
 from app.services.catalog import default_severity_level_id
 from app.services.incidents import create_incident
 from app.templating import templates
@@ -66,7 +68,10 @@ def declare(
     )
     db.flush()
     alerts_service.attach_alert_to_incident(db, alert, inc, by_user=user.id)
+    # same side-effects as POST /incidents: automation before commit, webhook after
+    automation.run_rules(db, trigger="incident.opened", incident=inc, by_user=user.id)
     db.commit()
+    webhooks.notify(db, inc, "opened", base_url=get_settings().base_url)
     return RedirectResponse(f"/incidents/{inc.id}", status_code=303)
 
 

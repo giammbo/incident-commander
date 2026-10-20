@@ -1,15 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-{% set open_count = incidents | rejectattr('is_closed') | list | length %}
 <div class="page-head">
   <h1>Incidents</h1>
-  <span class="stats"><b>{{ open_count }}</b> open <span class="sep">/</span> {{ incidents | length }} total</span>
+  {% with open_count=incidents | rejectattr('is_closed') | list | length, total_count=incidents | length %}{% include "partials/incident_stats.html" %}{% endwith %}
 </div>
 <p class="page-sub">Declare and run incidents in one place — severity, status, roles, timeline, follow-ups and integrations.</p>
 
 {% set _role = effective_role(current_user) %}
 {% if _role and _role.value in ("admin", "incident_commander") %}
-<form class="create" hx-post="/incidents" hx-target="#incident-list" hx-swap="afterbegin">
+{# Reset on this form's own 2xx only (child selects fire their own HTMX requests, whose
+   afterRequest bubbles here), then re-fire the HTMX-driven selects so the type-driven
+   severity/custom fields and the components list match the reset defaults. #}
+<form class="create" hx-post="/incidents" hx-target="#incident-list" hx-swap="afterbegin"
+      hx-on::after-request="if (event.detail.elt === this && event.detail.successful) { this.reset(); this.querySelectorAll('select[hx-get]').forEach(function (s) { htmx.trigger(s, 'change'); }); }">
   <input class="title-input" name="title" placeholder="What's happening?" required autocomplete="off">
   {% if incident_types %}
   <select name="incident_type_id" aria-label="Type"

@@ -41,15 +41,31 @@ response. Built to run on your own infrastructure, behind your own SSO.
 
 - **Ingest alerts** from your monitoring into a deduplicated **Alerts inbox** via a token-authenticated endpoint, then promote an alert to a new incident or attach it to an existing one.
 - **Adapters** — **AWS SNS** (CloudWatch alarms natively + EventBridge-via-SNS best-effort, with AWS **signature verification**), **Prometheus Alertmanager** (the kube-prometheus webhook), and a **generic JSON** mapper. Alerts dedupe per source key and track a firing↔resolved lifecycle.
+- **Generic JSON mapping** — each Generic JSON integration has a *Field mapping* form in **Settings → Inbound integrations**. Every field is a dotted path into the request body (`alert.id` reads `{"alert": {"id": "…"}}`):
+
+  | Field | Required | Meaning |
+  |---|---|---|
+  | Dedup key path | yes | Unique alert key; repeats of the same key update one alert. Until it is set, ingest answers `400`. |
+  | Title path | no | Alert title (defaults to `Alert`). |
+  | Severity path | no | Raw severity, matched by alert automation conditions. |
+  | Status path | no | Field holding the alert state; when absent the alert is `firing`. |
+  | Resolved value | no | Value of the status field that marks the alert resolved (default `resolved`). |
+
+  ```bash
+  curl -X POST "$BASE_URL/ingest/<token>" -H 'Content-Type: application/json' \
+    -d '{"alert": {"id": "chk-42", "name": "Checkout 5xx", "level": "critical", "state": "open"}}'
+  ```
 
 ### Automation / workflows
 
 - **Trigger → conditions → actions rules** (admin-defined) that run automatically on `incident.opened`, `incident.status_changed`, and `alert.received`. Conditions are AND-matched equalities on a fixed field set (severity / type / privacy / system for incidents; source / severity / status for alerts).
-- **Actions** reuse the app's own side-effects: open a Slack channel, assign a role, set status, post a stakeholder update, create a follow-up — and, for inbound alerts, **auto-create an incident** (linking the alert, then running the incident-opened rules). Execution is inline, partial-failure-safe, and recorded on the timeline.
+- **No IDs to know** — the editor is picker-driven: choose a trigger ("When an alert is received"), and only the conditions and actions that trigger supports are offered; condition values come from your real severities, types, systems and alert statuses ("is" or multi-select "is one of"), with a checkbox for privacy and free text only for the alert's source / raw severity. Each saved rule is listed as one readable sentence, e.g. *When an alert is received and severity is critical → create incident (SEV1)*.
+- **Actions** reuse the app's own side-effects: open a Slack channel, assign a role, set status, post a stakeholder update, create a follow-up — and, for inbound alerts, **auto-create an incident** (linking the alert, recording which rule created it, running the incident-opened rules and firing the `opened` webhooks). Execution is inline, partial-failure-safe, and recorded on the timeline.
+- **One path, same effects** — an incident declared from the form, promoted from the Alerts inbox, or auto-created by a rule gets the same treatment: incident-opened rules run and the `opened` webhooks fire.
 
 ### Catalogue & map
 
-- **Systems & Components** — register the Systems you operate and their Components (each in exactly one System), with a two-tier dependency graph (Component→Component within a system, System→System across systems).
+- **Systems & Components** — register the Systems you operate and their Components (each in exactly one System), with a two-tier dependency graph (Component→Component within a system, System→System across systems). Dependencies are edited from a checklist that shows each item's direction and who uses it; **dependency loops are rejected** (direct or indirect), and choices that would close one are disabled with the reason.
 - **Team ownership** — define **Teams** and assign an owning team to each system/component; shown on the catalogue and on the incident detail (who to pull in).
 - **3D service map** — an interactive force-graph of systems/components with **live blast-radius**: open incidents light up the affected nodes and everything that depends on them.
 
@@ -57,7 +73,7 @@ response. Built to run on your own infrastructure, behind your own SSO.
 
 - **Slack** — connect workspaces via OAuth; declaring an incident auto-opens a channel and posts opened/updated/closed messages.
 - **Video** — pluggable video providers (Google Meet bridge auto-created per incident) via a small provider abstraction.
-- **Outgoing webhooks** — fire on opened/updated/closed/update to **Slack, Microsoft Teams, Discord, or a generic JSON** endpoint.
+- **Outgoing webhooks** — fire on opened/updated/closed/update to **Slack, Microsoft Teams (Workflows / Adaptive Card), Discord, or a generic JSON** endpoint (`opened` fires however the incident was created: form, Alerts inbox, or alert automation). Delivered in the background (never slows the request), retried on network errors / 5xx, and optionally **HMAC-signed** — see [Outgoing webhooks](#outgoing-webhooks).
 - **Inbound alerting** — receive alerts from AWS SNS (CloudWatch), Prometheus Alertmanager, or any system via a generic JSON endpoint (see [Inbound alerting](#inbound-alerting) above).
 
 ### Platform
@@ -151,6 +167,30 @@ default**. No Calendar event is created. Requires a Workspace edition with the G
 
 (Slack is analogous: create an app at <https://api.slack.com/apps>, register
 `<BASE_URL>/connections/slack/callback`, paste the credentials into **Settings → Slack**, then connect a workspace.)
+
+### Outgoing webhooks
+
+Add them in **Settings → Outgoing webhooks**. Deliveries leave the request on a small background
+pool: the page responds immediately, and each webhook gets 1 attempt + 2 retries (0.5 s, then 1.5 s
+backoff) on network errors or HTTP 5xx; 4xx responses are not retried. A failing webhook never
+blocks the others or the incident operation. Pending deliveries live in memory only.
+
+- **Microsoft Teams** — the legacy Office 365 connectors (`MessageCard`) are retired. In Teams, add a
+  **Workflows** webhook (*"Post to a channel when a webhook request is received"*) and paste its URL.
+  The payload is `{"type":"message","attachments":[{"contentType":"application/vnd.microsoft.card.adaptive","content":{…}}]}`
+  with an Adaptive Card 1.4: title, severity / status facts, the stakeholder message (for `update`)
+  and an *Open incident* button.
+- **Signature** — set an optional **signing secret** (stored encrypted, write-only). Each request
+  then carries `X-IC-Signature: sha256=<hex>`, the HMAC-SHA256 of the raw request body keyed with
+  the secret. Verify it against the bytes you received, before parsing the JSON:
+
+  ```python
+  import hashlib, hmac
+
+  def verify(secret: str, body: bytes, header: str) -> bool:
+      expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+      return hmac.compare_digest(expected, header or "")
+  ```
 
 ## Deploy on Kubernetes (Helm)
 

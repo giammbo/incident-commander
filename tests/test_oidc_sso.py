@@ -189,3 +189,38 @@ def test_state_mismatch_rejected(client, db_session, monkeypatch):
     )
     assert r.status_code == 303
     assert "exchange" not in called  # rejected before token exchange
+
+
+def _auth_card(html: str) -> str:
+    start = html.index('class="auth-card"')
+    return html[start : html.index("</form>", start)]
+
+
+def test_login_page_sso_link_inside_auth_card(client, db_session):
+    _configure_sso(db_session)
+    db_session.commit()
+    html = client.get("/login").text
+    card = _auth_card(html)
+    assert 'href="/login/oidc"' in card and "Sign in with Acme ID" in card
+    # below the local Sign in button, behind an "or" separator
+    assert card.index('type="submit"') < card.index('class="auth-or"') < card.index("/login/oidc")
+    assert html.count('href="/login/oidc"') == 1
+
+
+def test_login_page_without_sso_has_no_sso_link(client, db_session):
+    html = client.get("/login").text
+    assert "/login/oidc" not in html and 'class="auth-or"' not in html
+
+
+def test_local_login_disabled_error_keeps_sso_link_in_card(client, db_session):
+    _configure_sso(db_session)
+    sso_settings(db_session).allow_local_login = False
+    create_user(
+        db_session, email="bob@acme.io", name="Bob", role=Role.read_only, password="pw-123456"
+    )
+    db_session.commit()
+    r = client.post("/login", data={"email": "bob@acme.io", "password": "pw-123456"})
+    assert r.status_code == 401
+    card = _auth_card(r.text)
+    assert "Local login is disabled" in card
+    assert 'href="/login/oidc"' in card and "Sign in with Acme ID" in card

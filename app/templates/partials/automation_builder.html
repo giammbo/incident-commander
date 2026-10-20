@@ -1,0 +1,21 @@
+{# Conditions + action picker for one trigger; swapped in when the trigger select changes. #}
+<div class="field-block"><span>Only if (all must match — leave a row empty to skip it)</span>
+  {% for i in cond_indexes %}
+  <div class="cond-row form-row">
+    <select name="cond-{{ i }}-field" aria-label="Condition {{ i + 1 }}"
+            hx-get="/automations/condition-value" hx-vals='{"i": {{ i }}}' hx-include="this"
+            hx-target="#cond-{{ i }}-value" hx-swap="innerHTML" hx-trigger="change">
+      <option value="">— no condition —</option>
+      {% for f, label in fields %}<option value="{{ f }}">{{ label }}</option>{% endfor %}
+    </select>
+    <span id="cond-{{ i }}-value" class="cond-value"></span>
+  </div>
+  {% endfor %}
+</div>
+<div class="field-block"><span>Then</span>
+  <select name="action_type" aria-label="Action" hx-get="/automations/action-params" hx-target="#action-params" hx-swap="innerHTML" hx-trigger="change" hx-include="this">
+    <option value="">— pick an action —</option>
+    {% for a, label in actions %}<option value="{{ a }}">{{ label }}</option>{% endfor %}
+  </select>
+  <div id="action-params" class="form-row" style="margin-top:8px"></div>
+</div>

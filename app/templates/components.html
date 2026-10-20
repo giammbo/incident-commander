@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/dep_picker.html" import dep_picker %}
 {% block content %}
 <div class="page-head"><h1>Components</h1></div>
 <p class="page-sub">The components inside each system and how they depend on one another — the fine-grained catalogue layer.</p>
@@ -8,25 +9,22 @@
 <div class="card">
   {% if components %}
   <table>
-    <thead><tr><th>Name</th><th>System</th><th>Owner</th><th>Depends on</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>System</th><th>Owner</th><th>Dependencies</th><th></th></tr></thead>
     <tbody>
       {% for c in components %}
       <tr>
         <td>{{ c.name }}</td>
         <td class="muted">{{ c.system.name }}</td>
         <td class="muted">{{ c.owner_team.name if c.owner_team else '—' }}</td>
-        <td>
+        <td class="dep-cell">
+          {% if c.depends_on %}<div>→ {{ c.depends_on | map(attribute='name') | sort | join(', ') }}</div>{% else %}<span class="muted">—</span>{% endif %}
+          {% set _ub = deps.used_by[c.id] %}
+          {% if _ub %}<div class="dep-usedby">used by {{ _ub | map(attribute='name') | join(', ') }}</div>{% endif %}
           {% if can_manage %}
           {% set same_system = components | selectattr('system_id', 'equalto', c.system_id) | rejectattr('id', 'equalto', c.id) | list %}
-          <form method="post" action="/components/{{ c.id }}/deps" style="display:inline-flex; gap:8px; align-items:center">
-            {% if same_system %}
-            <select name="depends_on_ids" multiple style="min-width:150px">
-              {% for o in same_system %}<option value="{{ o.id }}"{% if o in c.depends_on %} selected{% endif %}>{{ o.name }}</option>{% endfor %}
-            </select>
-            <button class="btn btn-sm" type="submit">Save</button>
-            {% else %}<span class="muted">No other components in {{ c.system.name }}</span>{% endif %}
-          </form>
-          {% else %}{{ c.depends_on | map(attribute='name') | join(', ') or '—' }}{% endif %}
+          {% if same_system %}{{ dep_picker("/components/" ~ c.id ~ "/deps", c, same_system, deps.blocked[c.id]) }}
+          {% else %}<div class="dep-usedby">No other components in {{ c.system.name }} to depend on.</div>{% endif %}
+          {% endif %}
         </td>
         <td>
           {% if can_manage %}

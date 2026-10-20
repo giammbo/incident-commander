@@ -474,6 +474,7 @@ def settings_webhook_create(
     name: str = Form(...),
     url: str = Form(...),
     format: str = Form("generic"),
+    secret: str | None = Form(None),
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
@@ -488,7 +489,15 @@ def settings_webhook_create(
     except ValueError:
         request.session["flash"] = "Unknown webhook format."
         return RedirectResponse("/settings", status_code=303)
-    db.add(Webhook(name=name, url=url, format=fmt, created_by=user.id))
+    db.add(
+        Webhook(
+            name=name,
+            url=url,
+            format=fmt,
+            secret=(secret or "").strip() or None,
+            created_by=user.id,
+        )
+    )
     db.commit()
     return RedirectResponse("/settings", status_code=303)
 
@@ -561,6 +570,49 @@ def settings_integrations_create(
         request.session["flash"] = "Unknown integration kind."
         return RedirectResponse("/settings", status_code=303)
     db.add(InboundIntegration(name=name, kind=kind, token=secrets.token_urlsafe(32)))
+    db.commit()
+    return RedirectResponse("/settings", status_code=303)
+
+
+GENERIC_MAPPING_KEYS = ("dedup_key", "title", "status", "severity", "resolved_value")
+
+
+@router.post("/settings/integrations/{integration_id}/settings")
+def settings_integrations_mapping(
+    request: Request,
+    integration_id: int,
+    dedup_key: str = Form(...),
+    title: str = Form(""),
+    status: str = Form(""),
+    severity: str = Form(""),
+    resolved_value: str = Form(""),
+    user: User = Depends(require_role(Role.admin)),
+    db: Session = Depends(get_db),
+):
+    """Save the dotted JSON paths the generic mapper (parse_generic) reads."""
+    from sqlalchemy import select
+
+    from app.models import InboundIntegration
+
+    integ = db.scalar(select(InboundIntegration).where(InboundIntegration.id == integration_id))
+    if integ is None:
+        return HTMLResponse("Not found", status_code=404)
+    if integ.kind != "generic":
+        request.session["flash"] = "Only Generic JSON integrations have a field mapping."
+        return RedirectResponse("/settings", status_code=303)
+    values = {
+        "dedup_key": dedup_key,
+        "title": title,
+        "status": status,
+        "severity": severity,
+        "resolved_value": resolved_value,
+    }
+    mapping = {k: v.strip() for k, v in values.items() if v and v.strip()}
+    if "dedup_key" not in mapping:
+        request.session["flash"] = "The dedup key path is required."
+        return RedirectResponse("/settings", status_code=303)
+    kept = {k: v for k, v in (integ.settings or {}).items() if k not in GENERIC_MAPPING_KEYS}
+    integ.settings = {**kept, **mapping}  # new dict so the JSONB change is tracked
     db.commit()
     return RedirectResponse("/settings", status_code=303)
 

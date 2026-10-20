@@ -1,0 +1,22 @@
+{# Operator + value widget for condition row i (field-dependent). #}
+{% if field == "is_private" %}
+  <input type="hidden" name="cond-{{ i }}-op" value="equals">
+  <label class="check"><input type="checkbox" name="cond-{{ i }}-value" value="true"{% if selected and selected[0] == "true" %} checked{% endif %}> the incident is private <span class="muted">(unchecked = not private)</span></label>
+{% elif field %}
+  <select name="cond-{{ i }}-op" aria-label="Condition {{ i + 1 }} operator"
+          hx-get="/automations/condition-value" hx-vals='{"i": {{ i }}}' hx-include="closest .cond-row"
+          hx-target="#cond-{{ i }}-value" hx-swap="innerHTML" hx-trigger="change">
+    {% for o, label in op_labels.items() %}<option value="{{ o }}"{% if o == op %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  {% if options is not none %}
+    {% if options %}
+    <select name="cond-{{ i }}-value" aria-label="Condition {{ i + 1 }} value"{% if op == "in" %} multiple size="{{ [options | length, 4] | min }}"{% endif %} required>
+      {% for v, label in options %}<option value="{{ v }}"{% if v in selected %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    {% else %}<span class="muted">Nothing to choose from yet — add some in Settings / Catalog.</span>{% endif %}
+  {% else %}
+    <input name="cond-{{ i }}-value" aria-label="Condition {{ i + 1 }} value" required
+           value="{{ selected | join(', ') }}"
+           placeholder="{{ 'comma-separated, e.g. critical, high' if op == 'in' else 'e.g. critical' }}">
+  {% endif %}
+{% endif %}

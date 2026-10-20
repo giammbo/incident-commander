@@ -100,13 +100,14 @@
   <h2>Outgoing webhooks</h2>
   {% if webhooks %}
   <table>
-    <thead><tr><th>Name</th><th>Format</th><th>URL</th><th>On</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Format</th><th>URL</th><th>Signed</th><th>On</th><th></th></tr></thead>
     <tbody>
       {% for w in webhooks %}
       <tr>
         <td>{{ w.name }}</td>
         <td class="muted">{{ w.format.value }}</td>
         <td class="muted">{{ w.url[:28] }}{{ '…' if w.url|length > 28 else '' }}</td>
+        <td>{% if w.secret %}<span class="badge-yes">yes</span>{% else %}<span class="muted">—</span>{% endif %}</td>
         <td>{% if w.enabled %}<span class="badge-yes">yes</span>{% else %}<span class="badge-no">no</span>{% endif %}</td>
         <td><form method="post" action="/settings/webhooks/{{ w.id }}/delete" style="display:inline">
           <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ w.name|tojson }} + "?")'>Delete</button>
@@ -125,9 +126,10 @@
       </label>
     </div>
     <label class="field-block"><span>Webhook URL</span><input name="url" required></label>
+    <label class="field-block"><span>Signing secret (optional)</span><input name="secret" type="password" autocomplete="new-password" placeholder="Adds an X-IC-Signature HMAC header"></label>
     <button class="btn btn-primary" type="submit">Add webhook</button>
   </form>
-  <p class="muted" style="margin:10px 0 0; font-size:12.5px">Fired on incident opened / updated / closed. Slack/Discord/Teams use their incoming-webhook format; Generic posts a JSON event.</p>
+  <p class="muted" style="margin:10px 0 0; font-size:12.5px">Fired on incident opened / updated / closed. Slack/Discord use their incoming-webhook format; Teams takes a Workflows webhook URL (Adaptive Card); Generic posts a JSON event. Sent in the background, retried twice on network errors / 5xx.</p>
 </div>
 
 <div class="card">
@@ -406,6 +408,25 @@
       <button class="chip" type="submit">delete</button>
     </form>
   </div>
+  {% if integ.kind == "generic" %}
+  {% set _m = integ.settings or {} %}
+  <details class="integ-mapping"{% if not _m.get("dedup_key") %} open{% endif %}>
+    <summary>Field mapping{% if not _m.get("dedup_key") %} <span class="role" data-role="">Not configured — alerts are rejected until a dedup key path is set</span>{% endif %}</summary>
+    <p class="muted" style="font-size:12.5px; margin:6px 0 10px">Dotted paths into the JSON body, e.g. <code>alert.id</code> for <code>{"alert": {"id": "…"}}</code>. Leave a field empty to skip it.</p>
+    <form method="post" action="/settings/integrations/{{ integ.id }}/settings">
+      <div class="form-row">
+        <label class="field-block grow"><span>Dedup key path *</span><input name="dedup_key" value="{{ _m.get('dedup_key', '') }}" required placeholder="alert.id"></label>
+        <label class="field-block grow"><span>Title path</span><input name="title" value="{{ _m.get('title', '') }}" placeholder="alert.name"></label>
+        <label class="field-block grow"><span>Severity path</span><input name="severity" value="{{ _m.get('severity', '') }}" placeholder="alert.level"></label>
+      </div>
+      <div class="form-row">
+        <label class="field-block grow"><span>Status path</span><input name="status" value="{{ _m.get('status', '') }}" placeholder="alert.state"></label>
+        <label class="field-block grow"><span>Resolved value</span><input name="resolved_value" value="{{ _m.get('resolved_value', 'resolved') }}" placeholder="resolved"></label>
+      </div>
+      <div><button class="btn btn-sm" type="submit">Save mapping</button></div>
+    </form>
+  </details>
+  {% endif %}
   {% else %}
   <span class="muted">No inbound integrations yet.</span>
   {% endfor %}

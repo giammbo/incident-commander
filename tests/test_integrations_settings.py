@@ -67,3 +67,115 @@ def test_non_admin_cannot_delete(client, db_session):
         db_session.scalar(select(InboundIntegration).where(InboundIntegration.id == integ.id))
         is not None
     )
+
+
+def _generic(db_session, token="tok-gen", settings=None):
+    integ = InboundIntegration(name="gen", kind="generic", token=token, settings=settings or {})
+    db_session.add(integ)
+    db_session.commit()
+    return integ
+
+
+def test_admin_saves_generic_mapping_only_non_empty_keys(client, db_session):
+    _login(client, db_session, Role.admin)
+    integ = _generic(db_session)
+    r = client.post(
+        f"/settings/integrations/{integ.id}/settings",
+        data={
+            "dedup_key": " alert.id ",
+            "title": "alert.name",
+            "status": "",
+            "severity": "alert.level",
+            "resolved_value": "",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db_session.refresh(integ)
+    assert integ.settings == {
+        "dedup_key": "alert.id",
+        "title": "alert.name",
+        "severity": "alert.level",
+    }
+
+
+def test_saving_mapping_clears_previous_paths(client, db_session):
+    _login(client, db_session, Role.admin)
+    integ = _generic(db_session, settings={"dedup_key": "a", "title": "old.title", "status": "s"})
+    client.post(
+        f"/settings/integrations/{integ.id}/settings",
+        data={"dedup_key": "b", "title": "", "status": "st", "resolved_value": "ok"},
+        follow_redirects=False,
+    )
+    db_session.refresh(integ)
+    assert integ.settings == {"dedup_key": "b", "status": "st", "resolved_value": "ok"}
+
+
+def test_blank_dedup_key_is_rejected(client, db_session):
+    _login(client, db_session, Role.admin)
+    integ = _generic(db_session, settings={"dedup_key": "keep.me"})
+    r = client.post(
+        f"/settings/integrations/{integ.id}/settings",
+        data={"dedup_key": "   ", "title": "t"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db_session.refresh(integ)
+    assert integ.settings == {"dedup_key": "keep.me"}
+
+
+def test_mapping_rejected_for_non_generic_kind(client, db_session):
+    _login(client, db_session, Role.admin)
+    integ = InboundIntegration(name="am", kind="alertmanager", token="tok-am", settings={})
+    db_session.add(integ)
+    db_session.commit()
+    client.post(
+        f"/settings/integrations/{integ.id}/settings",
+        data={"dedup_key": "x"},
+        follow_redirects=False,
+    )
+    db_session.refresh(integ)
+    assert integ.settings == {}
+
+
+def test_mapping_unknown_integration_404(client, db_session):
+    _login(client, db_session, Role.admin)
+    r = client.post(
+        "/settings/integrations/9999/settings", data={"dedup_key": "x"}, follow_redirects=False
+    )
+    assert r.status_code == 404
+
+
+def test_non_admin_cannot_save_mapping(client, db_session):
+    integ = _generic(db_session)
+    _login(client, db_session, Role.incident_commander)
+    r = client.post(
+        f"/settings/integrations/{integ.id}/settings",
+        data={"dedup_key": "x"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 403
+    db_session.refresh(integ)
+    assert integ.settings == {}
+
+
+def test_settings_page_shows_generic_mapping_form_with_current_values(client, db_session):
+    _login(client, db_session, Role.admin)
+    integ = _generic(db_session, settings={"dedup_key": "alert.id", "title": "alert.name"})
+    other = InboundIntegration(name="am", kind="alertmanager", token="tok-am2", settings={})
+    db_session.add(other)
+    db_session.commit()
+    html = client.get("/settings").text
+    assert f'action="/settings/integrations/{integ.id}/settings"' in html
+    assert f'action="/settings/integrations/{other.id}/settings"' not in html
+    assert 'name="dedup_key" value="alert.id" required' in html
+    assert 'name="title" value="alert.name"' in html
+    # resolved_value falls back to the parser default when unset
+    assert 'name="resolved_value" value="resolved"' in html
+
+
+def test_settings_page_flags_unconfigured_generic(client, db_session):
+    _login(client, db_session, Role.admin)
+    _generic(db_session)
+    html = client.get("/settings").text
+    assert "Not configured" in html

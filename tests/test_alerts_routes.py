@@ -4,7 +4,16 @@ from sqlalchemy import select
 
 from app.db import get_db
 from app.main import create_app
-from app.models import Alert, InboundIntegration, Incident, Role, SeverityLevel
+from app.models import (
+    Alert,
+    InboundIntegration,
+    Incident,
+    IncidentEvent,
+    Role,
+    SeverityLevel,
+    Webhook,
+    WorkflowRule,
+)
 from app.services.users import bootstrap_admin, create_user
 
 
@@ -72,6 +81,38 @@ def test_declare_creates_and_links_incident(client, db_session):
     db_session.refresh(a)
     inc = db_session.scalar(select(Incident).where(Incident.id == a.incident_id))
     assert inc is not None and inc.title == "Boom"
+
+
+def test_declare_runs_incident_opened_rules(client, db_session):
+    # Declaring from the inbox must have the same side-effects as POST /incidents:
+    # the incident.opened automation rules run on the new incident.
+    a = _alert(db_session)
+    db_session.add(
+        WorkflowRule(name="on-open", trigger="incident.opened", conditions=[], actions=[])
+    )
+    db_session.commit()
+    _login(client, db_session, "ic@x.io", Role.incident_commander)
+    client.post(f"/alerts/{a.id}/declare", follow_redirects=False)
+    db_session.refresh(a)
+    bodies = list(
+        db_session.scalars(
+            select(IncidentEvent.body).where(
+                IncidentEvent.incident_id == a.incident_id,
+                IncidentEvent.entry_type == "automation",
+            )
+        )
+    )
+    assert "Automation 'on-open' ran" in bodies
+
+
+def test_declare_fires_opened_webhook(client, db_session, webhook_posts):
+    a = _alert(db_session)
+    db_session.add(Webhook(name="W", url="https://hooks/x", format="slack", enabled=True))
+    db_session.commit()
+    _login(client, db_session, "ic@x.io", Role.incident_commander)
+    r = client.post(f"/alerts/{a.id}/declare", follow_redirects=False)
+    assert r.status_code == 303
+    assert any("incident opened: Boom" in (j.get("text") or "") for _, j in webhook_posts)
 
 
 def test_attach_to_existing(client, db_session):

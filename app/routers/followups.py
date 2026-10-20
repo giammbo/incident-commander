@@ -1,13 +1,14 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_role, require_user
 from app.db import get_db
 from app.models import FollowUp, Incident, Role, User
+from app.routers.incidents import incident_redirect
 from app.services import followups as svc
 from app.templating import templates
 
@@ -43,6 +44,7 @@ def create(
     description: str | None = Form(None),
     assignee_id: int | None = Form(None),
     due_on: str | None = Form(None),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -63,7 +65,7 @@ def create(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-    return RedirectResponse(f"/incidents/{incident_id}", status_code=303)
+    return incident_redirect(incident_id, return_tab)
 
 
 @router.post("/followups/{followup_id}/status")
@@ -71,6 +73,7 @@ def set_status(
     request: Request,
     followup_id: int,
     status: str = Form(...),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -84,7 +87,7 @@ def set_status(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-    return RedirectResponse(f"/incidents/{iid}", status_code=303)
+    return incident_redirect(iid, return_tab)
 
 
 @router.post("/followups/{followup_id}/edit")
@@ -95,6 +98,7 @@ def edit(
     description: str | None = Form(None),
     assignee_id: int | None = Form(None),
     due_on: str | None = Form(None),
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -115,13 +119,14 @@ def edit(
     except ValueError as exc:
         db.rollback()
         request.session["flash"] = str(exc)
-    return RedirectResponse(f"/incidents/{iid}", status_code=303)
+    return incident_redirect(iid, return_tab)
 
 
 @router.post("/followups/{followup_id}/delete")
 def delete(
     request: Request,
     followup_id: int,
+    return_tab: str | None = Form(None),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
@@ -133,4 +138,4 @@ def delete(
         fu
     )  # fu is already loaded; delete directly (svc.delete_followup re-fetch could raise)
     db.commit()
-    return RedirectResponse(f"/incidents/{iid}", status_code=303)
+    return incident_redirect(iid, return_tab)

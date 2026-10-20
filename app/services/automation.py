@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import SlackConnection, WorkflowRule
+from app.models import Incident, SlackConnection, WorkflowRule
 
 INCIDENT_TRIGGERS = ("incident.opened", "incident.status_changed")
 ALERT_TRIGGER = "alert.received"
@@ -121,7 +121,12 @@ def _matches(conditions, subject) -> bool:
     return True
 
 
-def run_rules(db: Session, *, trigger, incident=None, alert=None, by_user=None) -> None:
+def run_rules(db: Session, *, trigger, incident=None, alert=None, by_user=None) -> list:
+    """Run the enabled rules for ``trigger`` and return the incidents they created.
+
+    Only the ``alert.received`` ``create_incident`` action creates incidents; callers
+    use the returned list to fire post-commit side-effects (e.g. the "opened" webhook).
+    """
     subject = incident if incident is not None else alert
     rules = list(
         db.scalars(
@@ -130,21 +135,46 @@ def run_rules(db: Session, *, trigger, incident=None, alert=None, by_user=None) 
             .order_by(WorkflowRule.rank, WorkflowRule.id)
         )
     )
+    created: list = []
     for rule in rules:
         if subject is None or not _matches(rule.conditions, subject):
             continue
+        # Where to record this rule on the timeline: the incident itself, or — for an
+        # alert trigger — the incident the alert is already linked to (e.g. a re-fire).
+        target = incident if incident is not None else _linked_incident(db, alert)
         for action in rule.actions or []:
             try:
-                _execute_action(db, action, incident=incident, alert=alert, by_user=by_user)
+                new_inc = _execute_action(
+                    db, action, rule=rule, incident=incident, alert=alert, by_user=by_user
+                )
             except Exception:  # noqa: BLE001 — partial-failure-safe; one bad action must not 500
                 _log(
                     db,
-                    incident,
+                    target,
                     f"Automation '{rule.name}': action '{action.get('type')}' failed",
                     by_user,
                 )
-        _log(db, incident, f"Automation '{rule.name}' ran", by_user)
+            else:
+                if new_inc is not None:
+                    created.append(new_inc)
+        if incident is not None:
+            _log(db, incident, f"Automation '{rule.name}' ran", by_user)
+        elif target is not None:
+            _log(
+                db,
+                target,
+                f"Automation '{rule.name}' matched alert: {alert.title} "
+                "(already linked, no new incident)",
+                by_user,
+            )
     db.flush()
+    return created
+
+
+def _linked_incident(db, alert):
+    if alert is None or alert.incident_id is None:
+        return None
+    return db.get(Incident, alert.incident_id)
 
 
 def _log(db, incident, body, by_user):
@@ -155,7 +185,8 @@ def _log(db, incident, body, by_user):
     log_event(db, incident, entry_type="automation", body=body, created_by=by_user)
 
 
-def _execute_action(db, action, *, incident, alert, by_user) -> None:
+def _execute_action(db, action, *, rule, incident, alert, by_user):
+    """Run one action; return the incident it created, if any (else None)."""
     t = action.get("type")
     p = action.get("params") or {}
     if t == "open_slack_channel":
@@ -195,16 +226,17 @@ def _execute_action(db, action, *, incident, alert, by_user) -> None:
             created_by=by_user,
         )
     elif t == "create_incident":
-        _action_create_incident(db, alert, p, by_user)
+        return _action_create_incident(db, alert, p, rule=rule)
+    return None
 
 
-def _action_create_incident(db, alert, params, by_user) -> None:
+def _action_create_incident(db, alert, params, *, rule):
     from app.services.alerts import attach_alert_to_incident
     from app.services.catalog import default_severity_level_id
     from app.services.incidents import create_incident
 
     if alert is None or alert.incident_id is not None:
-        return
+        return None
     links = "\n".join(
         f"- [{lk.get('label', 'link')}]({lk.get('url')})" for lk in (alert.links or [])
     )
@@ -221,5 +253,7 @@ def _action_create_incident(db, alert, params, by_user) -> None:
     )
     db.flush()
     attach_alert_to_incident(db, alert, inc, by_user=None)
+    _log(db, inc, f"Created by automation '{rule.name}' from alert: {alert.title}", None)
     # one bounded chaining edge: run incident.opened rules on the new incident
     run_rules(db, trigger="incident.opened", incident=inc, by_user=None)
+    return inc

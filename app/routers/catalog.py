@@ -11,6 +11,7 @@ from app.services.catalog import (
     create_system,
     delete_component,
     delete_system,
+    dependency_view,
     set_component_dependencies,
     set_system_dependencies,
     update_component,
@@ -52,14 +53,21 @@ def system_detail(
     sysm = db.get(System, system_id)
     if sysm is None:
         return HTMLResponse("Not found", status_code=404)
-    other_systems = list(
-        db.scalars(select(System).where(System.id != system_id).order_by(System.name))
-    )
+    all_systems = list(db.scalars(select(System).order_by(System.name)))
+    other_systems = [x for x in all_systems if x.id != system_id]
+    view = dependency_view(all_systems)
     teams = list_teams(db)
     return templates.TemplateResponse(
         request,
         "system_detail.html",
-        {"current_user": user, "s": sysm, "other_systems": other_systems, "teams": teams},
+        {
+            "current_user": user,
+            "s": sysm,
+            "other_systems": other_systems,
+            "teams": teams,
+            "used_by": view["used_by"].get(sysm.id, []),
+            "blocked": view["blocked"].get(sysm.id, set()),
+        },
     )
 
 
@@ -162,6 +170,7 @@ def components_page(
             "components": components,
             "systems": systems,
             "teams": teams,
+            "deps": dependency_view(components),
         },
     )
 
