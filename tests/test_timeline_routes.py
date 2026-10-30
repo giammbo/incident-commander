@@ -80,8 +80,9 @@ def test_ic_adds_pins_deletes_note(client, db_session):
 def test_empty_note_flashes_not_500(client, db_session):
     _login(client, db_session, "ic@x.io", Role.incident_commander)
     inc = _incident(db_session)
+    db_session.commit()
     r = client.post(f"/incidents/{inc.id}/notes", data={"body": "   "}, follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 422
     assert not _notes(db_session, inc)
 
 

@@ -14,6 +14,7 @@ serve()   { exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
 case "${1:-all}" in
   migrate)   migrate ;;
   serve)     serve ;;
+  worker)    exec python -m app.services.oncall_worker ;;
   all)       migrate; serve ;;
   await-db)  until alembic current 2>/dev/null | grep -q '(head)'; do echo "waiting for DB migrations..."; sleep 3; done ;;
   *)         exec "$@" ;;

@@ -137,3 +137,29 @@ def test_failing_action_is_caught_and_next_runs(db_session):
     assert any(
         f.title == "still runs" for f in inc.follow_ups
     )  # 2nd action ran despite 1st failing
+
+
+@pytest.mark.parametrize("length", [300, 301])
+def test_followup_title_boundary_is_validated_before_execution(db_session, length):
+    sev = _sev(db_session)
+    inc = _incident(db_session, sev)
+    title = "x" * length
+    kwargs = dict(
+        name="Boundary action",
+        trigger="incident.opened",
+        conditions=[],
+        actions=[{"type": "create_followup", "params": {"title": title}}],
+    )
+    if length == 301:
+        with pytest.raises(ValueError, match="300"):
+            automation.create_rule(db_session, **kwargs)
+        assert db_session.query(WorkflowRule).count() == 0
+        assert inc.follow_ups == []
+        return
+    rule = automation.create_rule(db_session, **kwargs)
+    db_session.flush()
+    assert rule.enabled
+    automation.run_rules(db_session, trigger="incident.opened", incident=inc, by_user=1)
+    db_session.flush()
+    assert rule.last_run_outcome == "succeeded"
+    assert [followup.title for followup in inc.follow_ups] == [title]

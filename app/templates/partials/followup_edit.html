@@ -1,0 +1,7 @@
+<details class="followup-edit"><summary>Edit follow-up</summary>
+<form method="post" action="/followups/{{ f.id }}/edit" class="form-stack">
+<input type="hidden" name="return_tab" value="{{ return_tab }}"><input type="hidden" name="return_filter" value="{{ filter_status | default('open') }}">
+<label>Title<input name="title" required maxlength="300" value="{{ f.title }}"></label>
+<label>Description<textarea name="description">{{ f.description or "" }}</textarea></label>
+<div class="action-row"><label>Owner<select name="assignee_id"><option value="">Unassigned</option>{% for person in users %}<option value="{{ person.id }}"{% if f.assignee_id == person.id %} selected{% endif %}>{{ person.name }}</option>{% endfor %}</select></label><label>Due date<input type="date" name="due_on" value="{{ f.due_on or '' }}"></label></div>
+<button class="btn" type="submit">Save follow-up</button></form></details>

@@ -27,7 +27,7 @@
   {% if _can_manage %}
   <details style="margin-top:1rem"><summary style="cursor:pointer;font-weight:600">Edit</summary>
     <form method="post" action="/incidents/{{ i.id }}/postmortem" style="margin-top:.75rem">
-      <textarea name="body" rows="24" style="width:100%; font-family:var(--font-mono)">{{ postmortem.body }}</textarea>
+      <textarea aria-label="Postmortem Markdown" name="body" rows="24" style="width:100%; font-family:var(--font-mono)">{{ postmortem.body }}</textarea>
       <div style="margin-top:8px"><button class="btn btn-primary" type="submit">Save</button></div>
     </form>
   </details>

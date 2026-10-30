@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import login_user
+from app.auth import login_user, safe_next
 from app.config import get_settings
 from app.db import get_db
 from app.models import User
@@ -39,6 +39,8 @@ def _domain_allowed(claims: dict, allowed_domains: str | None) -> bool:
 
 @router.get("/login/oidc")
 def login_oidc(request: Request, db: Session = Depends(get_db)):
+    if "next" in request.query_params:
+        request.session["login_next"] = safe_next(request.query_params["next"])
     sso = sso_settings(db)
     if not _sso_ready(sso):
         request.session["flash"] = "Single sign-on is not enabled."
@@ -98,14 +100,18 @@ def oidc_callback(request: Request, code: str = "", state: str = "", db: Session
     email = (claims.get("email") or "").strip().lower()
     sub, iss = claims.get("sub"), sso.issuer
     user = db.scalar(select(User).where(User.oidc_issuer == iss, User.oidc_subject == sub))
+    by_email = None
     if user is None:
         by_email = db.scalar(select(User).where(User.email == email)) if email else None
-        if by_email is not None and (by_email.password_hash or by_email.is_protected_admin):
-            request.session["flash"] = (
-                "An account with this email already exists — sign in with your password."
-            )
-            return RedirectResponse("/login", status_code=303)
         user = by_email
+    if user is not None and not user.is_active:
+        request.session["flash"] = "Single sign-on failed. Contact an administrator."
+        return RedirectResponse("/login", status_code=303)
+    if by_email is not None and (by_email.password_hash or by_email.is_protected_admin):
+        request.session["flash"] = (
+            "An account with this email already exists — sign in with your password."
+        )
+        return RedirectResponse("/login", status_code=303)
     if user is None:
         user = User(email=email, name=claims.get("name") or email, is_active=True)
         user.groups = [_get_or_create_group(db, sso.auto_provision_role)]
@@ -115,4 +121,4 @@ def oidc_callback(request: Request, code: str = "", state: str = "", db: Session
     user.is_active = True
     db.commit()
     login_user(request, user)
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(safe_next(request.session.pop("login_next", None)), status_code=303)

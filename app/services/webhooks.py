@@ -164,8 +164,8 @@ def deliver_one(d: Delivery, *, post=None, sleep=time.sleep) -> bool:
             sleep(RETRY_BACKOFF[attempt - 1])
         try:
             resp = post(d.url, content=d.body, headers=headers, timeout=TIMEOUT)
-        except httpx.TransportError as exc:
-            log.warning("webhook %r: network error (attempt %d): %s", d.name, attempt + 1, exc)
+        except httpx.TransportError:
+            log.warning("webhook %r: network error (attempt %d)", d.name, attempt + 1)
             continue
         if resp.status_code < 500:
             if resp.status_code >= 400:
@@ -180,7 +180,7 @@ def deliver(deliveries: list[Delivery], *, post=None, sleep=time.sleep) -> None:
         try:
             deliver_one(d, post=post, sleep=sleep)
         except Exception:  # noqa: BLE001 — one webhook must never break the others
-            log.exception("webhook %r: delivery failed", d.name)
+            log.warning("webhook %r: delivery failed (provider details hidden)", d.name)
 
 
 def _dispatch(deliveries: list[Delivery]) -> None:
@@ -195,7 +195,7 @@ def notify(db: Session, incident, event: str, *, base_url: str, message: str | N
     try:
         deliveries = build_deliveries(db, incident, event, base_url=base_url, message=message)
     except Exception:  # noqa: BLE001 — notify is best-effort; never break the incident op
-        log.exception("webhooks: could not build %r deliveries", event)
+        log.warning("webhooks: could not build %r deliveries (details hidden)", event)
         return
     if deliveries:
         _dispatch(deliveries)

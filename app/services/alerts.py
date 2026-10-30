@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Alert, InboundIntegration
+from app.models import Alert, InboundIntegration, User
+from app.services import oncall_routes
 
 
 def ingest_alert(db: Session, integration: InboundIntegration, n: dict) -> Alert:
@@ -34,6 +35,8 @@ def ingest_alert(db: Session, integration: InboundIntegration, n: dict) -> Alert
     if n["status"] == "resolved":
         alert.status = "resolved"
         alert.resolved_at = now
+        db.flush()
+        oncall_routes.safe_resolve_for_alert(db, alert, now=now)
     else:
         alert.status = "firing"
         alert.resolved_at = None
@@ -41,10 +44,18 @@ def ingest_alert(db: Session, integration: InboundIntegration, n: dict) -> Alert
     return alert
 
 
-def list_alerts(db: Session, *, status: str | None = None) -> list[Alert]:
+def visible_alert_condition(user: User):
+    from app.services.incident_access import visible_incident_condition
+
+    return or_(Alert.incident_id.is_(None), Alert.incident.has(visible_incident_condition(user)))
+
+
+def list_alerts(db: Session, *, status: str | None = None, user: User | None = None) -> list[Alert]:
     stmt = select(Alert).order_by(Alert.last_seen_at.desc())
     if status is not None:
         stmt = stmt.where(Alert.status == status)
+    if user is not None:
+        stmt = stmt.where(visible_alert_condition(user))
     return list(db.scalars(stmt))
 
 
@@ -59,6 +70,8 @@ def attach_alert_to_incident(db: Session, alert: Alert, incident, *, by_user) ->
 
 
 def resolve_alert(db: Session, alert: Alert) -> None:
+    now = datetime.now(UTC)
     alert.status = "resolved"
-    alert.resolved_at = datetime.now(UTC)
+    alert.resolved_at = now
     db.flush()
+    oncall_routes.safe_resolve_for_alert(db, alert, now=now)

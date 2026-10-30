@@ -522,6 +522,7 @@ class Alert(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     links: Mapped[list] = mapped_column(JSONB, default=list)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    paging_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     incident_id: Mapped[int | None] = mapped_column(
         ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True
     )
@@ -541,3 +542,227 @@ class WorkflowRule(Base):
     actions: Mapped[list] = mapped_column(JSONB, default=list)
     rank: Mapped[int] = mapped_column(Integer, default=100)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Counts/outcome only: no payloads, incident titles or provider exception text.
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_outcome: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    last_run_summary: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+# --- On-call ---------------------------------------------------------------
+
+
+class Urgency(str, enum.Enum):
+    high = "high"
+    low = "low"
+
+
+class EscalationStatus(str, enum.Enum):
+    triggered = "triggered"
+    acknowledged = "acknowledged"
+    resolved = "resolved"
+    exhausted = "exhausted"
+
+
+class Schedule(Base):
+    __tablename__ = "schedules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    timezone: Mapped[str] = mapped_column(String(64))
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    rotations: Mapped[list[ScheduleRotation]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+        order_by="ScheduleRotation.rank",
+    )
+    overrides: Mapped[list[ScheduleOverride]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+        order_by="ScheduleOverride.starts_at",
+    )
+
+
+class ScheduleRotation(Base):
+    __tablename__ = "schedule_rotations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    schedule_id: Mapped[int] = mapped_column(ForeignKey("schedules.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120))
+    rank: Mapped[int] = mapped_column(Integer, default=1)  # 1 = on top
+    schedule: Mapped[Schedule] = relationship(back_populates="rotations")
+    versions: Mapped[list[ScheduleRotationVersion]] = relationship(
+        back_populates="rotation",
+        cascade="all, delete-orphan",
+        order_by="ScheduleRotationVersion.effective_from",
+    )
+
+
+class ScheduleRotationVersion(Base):
+    __tablename__ = "schedule_rotation_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    rotation_id: Mapped[int] = mapped_column(
+        ForeignKey("schedule_rotations.id", ondelete="CASCADE")
+    )
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    anchor: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # UTC instant of 1st handover
+    shift_hours: Mapped[int] = mapped_column(Integer)
+    user_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    # [{"days": [0..6], "start": "HH:MM", "end": "HH:MM"}] in shift-local time; [] = always
+    windows: Mapped[list] = mapped_column(JSONB, default=list)
+    rotation: Mapped[ScheduleRotation] = relationship(back_populates="versions")
+
+
+class ScheduleOverride(Base):
+    __tablename__ = "schedule_overrides"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    schedule_id: Mapped[int] = mapped_column(ForeignKey("schedules.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    schedule: Mapped[Schedule] = relationship(back_populates="overrides")
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
+class EscalationPath(Base):
+    __tablename__ = "escalation_paths"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    repeat_times: Mapped[int] = mapped_column(Integer, default=0)
+    levels: Mapped[list[EscalationLevel]] = relationship(
+        back_populates="path",
+        cascade="all, delete-orphan",
+        order_by="EscalationLevel.rank",
+    )
+
+
+class EscalationLevel(Base):
+    __tablename__ = "escalation_levels"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    path_id: Mapped[int] = mapped_column(ForeignKey("escalation_paths.id", ondelete="CASCADE"))
+    rank: Mapped[int] = mapped_column(Integer)
+    ack_timeout_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    schedule_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    user_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    path: Mapped[EscalationPath] = relationship(back_populates="levels")
+
+
+class AlertRoute(Base):
+    __tablename__ = "alert_routes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    rank: Mapped[int] = mapped_column(Integer, default=100)
+    conditions: Mapped[list] = mapped_column(JSONB, default=list)
+    escalation_path_id: Mapped[int] = mapped_column(ForeignKey("escalation_paths.id"))
+    urgency: Mapped[Urgency] = mapped_column(Enum(Urgency, name="urgency"), default=Urgency.high)
+    high_if: Mapped[list] = mapped_column(JSONB, default=list)
+    path: Mapped[EscalationPath] = relationship()
+
+
+class Escalation(Base):
+    __tablename__ = "escalations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(16))  # 'alert_route' | 'manual'
+    status: Mapped[EscalationStatus] = mapped_column(
+        Enum(EscalationStatus, name="escalation_status"), default=EscalationStatus.triggered
+    )
+    urgency: Mapped[Urgency] = mapped_column(Enum(Urgency, name="urgency"))
+    title: Mapped[str] = mapped_column(String(500))
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    short_code: Mapped[str] = mapped_column(String(4))
+    alert_id: Mapped[int | None] = mapped_column(
+        ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True
+    )
+    incident_id: Mapped[int | None] = mapped_column(
+        ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True
+    )
+    route_id: Mapped[int | None] = mapped_column(
+        ForeignKey("alert_routes.id", ondelete="SET NULL"), nullable=True
+    )
+    path_id: Mapped[int | None] = mapped_column(
+        ForeignKey("escalation_paths.id", ondelete="SET NULL"), nullable=True
+    )
+    direct_user_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    current_level: Mapped[int] = mapped_column(Integer, default=0)
+    repeat_count: Mapped[int] = mapped_column(Integer, default=0)
+    initiated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    events: Mapped[list[EscalationEvent]] = relationship(
+        back_populates="escalation",
+        cascade="all, delete-orphan",
+        order_by="EscalationEvent.id",
+    )
+    __table_args__ = (sa.Index("ix_escalations_alert_status", "alert_id", "status"),)
+
+
+class EscalationEvent(Base):
+    __tablename__ = "escalation_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escalation_id: Mapped[int] = mapped_column(ForeignKey("escalations.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(32))
+    body: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    escalation: Mapped[Escalation] = relationship(back_populates="events")
+
+
+class NotificationJob(Base):
+    __tablename__ = "notification_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escalation_id: Mapped[int] = mapped_column(ForeignKey("escalations.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))  # 'level' | 'notify' | 'exhaust'
+    run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    channel: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        sa.Index(
+            "ix_notification_jobs_pending",
+            "run_at",
+            postgresql_where=sa.text("status = 'pending'"),
+        ),
+    )
+
+
+class ContactMethod(Base):
+    __tablename__ = "contact_methods"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))  # 'phone' | 'slack' | 'push'
+    value: Mapped[str] = mapped_column(EncryptedString)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NotificationRule(Base):
+    __tablename__ = "notification_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    urgency: Mapped[Urgency] = mapped_column(Enum(Urgency, name="urgency"))
+    channel: Mapped[str] = mapped_column(String(16))
+    delay_minutes: Mapped[int] = mapped_column(Integer)
+
+
+class OnCallSettings(_SingletonSettings):
+    __tablename__ = "oncall_settings"
+    twilio_account_sid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    twilio_auth_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    twilio_from_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    vapid_public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vapid_private_key: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    worker_last_tick_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

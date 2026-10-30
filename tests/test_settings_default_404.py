@@ -32,4 +32,4 @@ def _login_admin(client, db_session):
 def test_default_unknown_id_flashes_not_500(client, db_session, path):
     _login_admin(client, db_session)
     r = client.post(path, follow_redirects=False)
-    assert r.status_code == 303  # graceful redirect, NOT 500
+    assert r.status_code == 422  # graceful redirect, NOT 500

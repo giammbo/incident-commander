@@ -20,7 +20,10 @@ def _admin(client, db_session):
     _, pw = bootstrap_admin(db_session, "admin@localhost")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
 
 def test_admin_creates_field(client, db_session):
@@ -58,7 +61,7 @@ def test_bad_field_type_flashes(client, db_session):
         data={"label": "X", "field_type": "bogus"},
         follow_redirects=False,
     )
-    assert r.status_code == 303
+    assert r.status_code == 422
     fields = list(db_session.scalars(select(CustomFieldDef).where(CustomFieldDef.label == "X")))
     assert fields == []
 

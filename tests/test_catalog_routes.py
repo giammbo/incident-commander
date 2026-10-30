@@ -20,7 +20,10 @@ def _login(client, db_session, *, role):
     db_session.flush()
     if role == "admin":
         client.post("/login", data={"email": "admin@localhost", "password": pw})
-        client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+        client.post(
+            "/account/password",
+            data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+        )
         return
     email = {"ic": "ic@x.io", "ro": "ro@x.io"}[role]
     r = {"ic": Role.incident_commander, "ro": Role.read_only}[role]

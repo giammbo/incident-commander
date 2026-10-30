@@ -5,7 +5,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Component, SeverityLevel, System
+from app.models import Component, SeverityLevel, System, Team
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -73,6 +73,22 @@ def delete_severity_level(db: Session, level_id: int) -> None:
         db.flush()
 
 
+def _validate_catalog_text(name: str, description: str | None, kind: str) -> str:
+    name = name.strip()
+    if not name:
+        raise ValueError(f"{kind} name is required")
+    if len(name) > 120:
+        raise ValueError(f"{kind} name must be 120 characters or fewer")
+    if description and len(description) > 500:
+        raise ValueError("Description must be 500 characters or fewer")
+    return name
+
+
+def _validate_owner(db: Session, owner_team_id: int | None) -> None:
+    if owner_team_id is not None and db.get(Team, owner_team_id) is None:
+        raise ValueError("Choose an existing owner team")
+
+
 def create_system(
     db: Session,
     *,
@@ -81,9 +97,8 @@ def create_system(
     created_by: int | None = None,
     owner_team_id: int | None = None,
 ) -> System:
-    name = name.strip()
-    if not name:
-        raise ValueError("System name is required")
+    name = _validate_catalog_text(name, description, "System")
+    _validate_owner(db, owner_team_id)
     if db.scalar(select(System).where(System.name == name)):
         raise ValueError(f"A system '{name}' already exists")
     sysm = System(
@@ -102,10 +117,14 @@ def update_system(
     description=_UNSET,
     owner_team_id=_UNSET,
 ) -> None:
+    if owner_team_id is not _UNSET:
+        _validate_owner(db, owner_team_id)
+    if description is not _UNSET and description and len(description) > 500:
+        raise ValueError("Description must be 500 characters or fewer")
     if name is not _UNSET:
-        name = name.strip()
-        if not name:
-            raise ValueError("System name is required")
+        name = _validate_catalog_text(
+            name, system.description if description is _UNSET else description, "System"
+        )
         clash = db.scalar(select(System).where(System.name == name, System.id != system.id))
         if clash:
             raise ValueError(f"A system '{name}' already exists")
@@ -197,9 +216,8 @@ def create_component(
     created_by: int | None = None,
     owner_team_id: int | None = None,
 ) -> Component:
-    name = name.strip()
-    if not name:
-        raise ValueError("Component name is required")
+    name = _validate_catalog_text(name, description, "Component")
+    _validate_owner(db, owner_team_id)
     if db.get(System, system_id) is None:
         raise ValueError("Unknown system")
     if db.scalar(select(Component).where(Component.name == name)):
@@ -225,9 +243,8 @@ def update_component(
     system_id: int,
     owner_team_id: int | None = None,
 ) -> None:
-    name = name.strip()
-    if not name:
-        raise ValueError("Component name is required")
+    name = _validate_catalog_text(name, description, "Component")
+    _validate_owner(db, owner_team_id)
     if db.get(System, system_id) is None:
         raise ValueError("Unknown system")
     clash = db.scalar(select(Component).where(Component.name == name, Component.id != component.id))

@@ -18,7 +18,7 @@ def insights_page(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    data = compute_insights(db, since=window_since(days))
+    data = compute_insights(db, since=window_since(days), user=user)
     return templates.TemplateResponse(
         request, "insights.html", {"current_user": user, "data": data, "days": days}
     )

@@ -1,0 +1,40 @@
+{% macro fields(kind, row=none) %}
+<div class="form-row">
+  <label class="field-block grow"><span>{{ 'Name' if kind == 'teams' else 'Label' }}</span><input name="{{ 'name' if kind == 'teams' else 'label' }}" value="{{ (row.name if kind == 'teams' else row.label) if row else '' }}" required maxlength="{{ {'severity':40,'statuses':40,'incident-types':60,'roles':60,'teams':80,'custom-fields':80}[kind] }}"></label>
+  {% if kind != 'teams' %}<label class="field-block"><span>Rank</span><input type="number" name="rank" value="{{ row.rank if row else 100 }}" min="0" max="2147483647" required></label>{% endif %}
+  {% if kind == 'severity' %}<label class="field-block"><span>Colour</span><input name="color" value="{{ row.color if row else '#808080' }}" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" required aria-describedby="severity-colour-help"></label>{% endif %}
+  {% if kind == 'statuses' %}<label class="field-block"><span>Lifecycle category</span><select name="category">{% for value in ['triage','active','closed'] %}<option value="{{ value }}" {{ 'selected' if row and row.category.value == value else '' }}>{{ value|title }}</option>{% endfor %}</select></label>{% endif %}
+</div>
+{% if kind in ['teams','incident-types'] %}<label class="field-block"><span>Description</span><textarea name="description" maxlength="10000">{{ row.description or '' if row else '' }}</textarea></label>{% endif %}
+{% if kind == 'incident-types' %}<label class="field-block"><span>Default severity</span><select name="default_severity_level_id"><option value="">Use application default</option>{% for s in severity_levels %}<option value="{{ s.id }}" {{ 'selected' if row and row.default_severity_level_id == s.id else '' }}>{{ s.label }}</option>{% endfor %}</select></label>{% endif %}
+{% if kind == 'custom-fields' %}
+<div class="form-row">
+  <label class="field-block"><span>Field type</span><select name="field_type">{% for ft in field_types %}<option value="{{ ft }}" {{ 'selected' if row and row.field_type == ft else '' }}>{{ ft|replace('_',' ')|title }}</option>{% endfor %}</select></label>
+  <label class="field-block grow"><span>Applies to incident types (none selected = all)</span><select name="incident_type_ids" multiple size="3">{% for t in incident_types %}<option value="{{ t.id }}" {{ 'selected' if row and t in row.incident_types else '' }}>{{ t.label }}</option>{% endfor %}</select></label>
+</div>
+<label class="field-block"><span>Options (one per line, required for select fields)</span><textarea name="options" rows="3" maxlength="5000">{{ row.options or '' if row else '' }}</textarea></label>
+<label class="check"><input type="checkbox" name="required" value="true" {{ 'checked' if row and row.required else '' }}> Required</label>
+{% endif %}
+{% if not row and kind in ['severity','statuses','incident-types'] %}<label class="check"><input type="checkbox" name="is_default" value="true"> Set as default</label>{% endif %}
+{% endmacro %}
+{% macro catalog(kind, heading, rows) %}
+<section class="card settings-section" id="{{ kind }}" tabindex="-1">
+  <h2>{{ heading }}</h2>
+  {% if kind == 'severity' %}<p class="muted" id="severity-colour-help">Use a hexadecimal colour such as #FF5D5D.</p>{% endif %}
+  <p class="muted">Edit preserves IDs and existing links.{% if kind == 'custom-fields' %} Deleting a field permanently removes its saved values from every incident. Change its label instead to preserve history.{% elif kind == 'teams' %} Deletion is blocked while the team owns systems or components.{% else %} Deletion is blocked for defaults and records used by incidents or automations. Choose another default or reassign references first.{% endif %}</p>
+  {% for row in rows %}
+  <div class="record-editor" id="{{ kind }}-{{ row.id }}">
+    <h3>{{ row.name if kind == 'teams' else row.label }}{% if row.is_default is defined and row.is_default %} <span class="badge-yes">Default</span>{% endif %}</h3>
+    {% if kind == 'custom-fields' %}<p class="muted">{{ row.field_type|replace('_',' ')|title }} · {{ 'Required' if row.required else 'Optional' }} · {{ row.incident_types|map(attribute='label')|join(', ') or 'All incident types' }}</p>{% endif %}
+    <details><summary>Edit {{ row.name if kind == 'teams' else row.label }}</summary>
+      <form method="post" action="/settings/{{ kind }}/{{ row.id }}/edit">{{ fields(kind, row) }}<button class="btn btn-primary" type="submit">Save changes</button></form>
+    </details>
+    <div class="row">
+      {% if row.is_default is defined and not row.is_default %}<form method="post" action="/settings/{{ kind }}/{{ row.id }}/default"><button class="btn btn-sm" type="submit">Make default</button></form>{% endif %}
+      <form method="post" action="/settings/{{ kind }}/{{ row.id }}/delete" onsubmit="return confirm('{{ 'Permanently delete this field and all its saved incident values?' if kind == 'custom-fields' else 'Delete this record? Records in use and defaults must be reassigned first.' }}')"><button class="btn btn-sm" type="submit">Delete {{ row.name if kind == 'teams' else row.label }}</button></form>
+    </div>
+  </div>
+  {% else %}<p class="muted">No records yet.</p>{% endfor %}
+  <details><summary>Add {{ heading|lower }}</summary><form method="post" action="/settings/{{ kind }}">{{ fields(kind) }}<button class="btn btn-primary" type="submit">Add record</button></form></details>
+</section>
+{% endmacro %}

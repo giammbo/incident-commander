@@ -1,49 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>Systems</h1></div>
-<p class="page-sub">The systems you operate and the teams that own them — the top tier of your service catalogue.</p>
+<p class="page-sub">Systems, their owners and dependencies.</p>
 {% set _role = effective_role(current_user) %}
 {% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
-
+{% set catalog_kind = 'systems' %}
 <div class="card">
+  {% include "partials/catalog_controls.html" %}
   {% if systems %}
-  <table>
-    <thead><tr><th>Name</th><th>Owner</th><th>Components</th><th>Depends on</th><th></th></tr></thead>
-    <tbody>
-      {% for s in systems %}
-      <tr>
-        <td><a href="/systems/{{ s.id }}">{{ s.name }}</a></td>
-        <td class="muted">{{ s.owner_team.name if s.owner_team else '—' }}</td>
-        <td>{{ s.components | length }}</td>
-        <td class="muted">{{ s.depends_on | map(attribute='name') | join(', ') or '—' }}</td>
-        <td>
-          {% if can_manage %}
-          <form method="post" action="/systems/{{ s.id }}/delete" style="display:inline">
-            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ s.name|tojson }} + "?")'>Delete</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="muted">No systems yet.</p>{% endif %}
-
-  {% if can_manage %}
-  <h3 style="margin:16px 0 10px">Add system</h3>
-  <form method="post" action="/systems">
-    <div class="form-row">
-      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120"></label>
-      <label class="field-block grow"><span>Description</span><input name="description" maxlength="500"></label>
-    </div>
-    <label class="field-block"><span>Owner team</span>
-      <select name="owner_team_id">
-        <option value="">—</option>
-        {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
-      </select>
-    </label>
-    <button class="btn btn-primary" type="submit">Add system</button>
-  </form>
-  {% endif %}
+  <div class="table-scroll"><table class="catalog-table">
+    <thead><tr><th>Name</th><th>Owner</th><th>Components</th><th>Depends on</th>{% if can_manage %}<th>Actions</th>{% endif %}</tr></thead>
+    <tbody>{% for s in systems %}<tr>
+      <td><a href="/systems/{{ s.id }}">{{ s.name }}</a></td>
+      <td>{{ s.owner_team.name if s.owner_team else 'No owner' }}</td>
+      <td><a href="/components?system_id={{ s.id }}">{{ s.components | length }} components</a></td>
+      <td>{% for d in s.depends_on %}<a href="/systems/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% else %}None{% endfor %}</td>
+      {% if can_manage %}<td><form method="post" action="/systems/{{ s.id }}/delete"><button class="btn btn-sm" type="submit" aria-label="Delete {{ s.name }}" onclick='return confirm("Delete " + {{ s.name|tojson }} + "? Systems with incidents or components must be reassigned first. Dependency links will be removed.")'>Delete</button></form></td>{% endif %}
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="empty">No systems match these filters. Clear filters or add a system.</p>{% endif %}
+  {% include "partials/catalog_pagination.html" %}
 </div>
+{% if can_manage %}
+<div class="card"><h2>Add system</h2>
+  {% set form_values = draft %}{% set form_action = '/systems' %}{% set submit_label = 'Add system' %}
+  {% include "partials/catalog_form.html" %}
+</div>
+{% endif %}
 {% endblock %}

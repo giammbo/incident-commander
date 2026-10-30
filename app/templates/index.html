@@ -8,35 +8,32 @@
 
 {% set _role = effective_role(current_user) %}
 {% if _role and _role.value in ("admin", "incident_commander") %}
-{# Reset on this form's own 2xx only (child selects fire their own HTMX requests, whose
-   afterRequest bubbles here), then re-fire the HTMX-driven selects so the type-driven
-   severity/custom fields and the components list match the reset defaults. #}
-<form class="create" hx-post="/incidents" hx-target="#incident-list" hx-swap="afterbegin"
-      hx-on::after-request="if (event.detail.elt === this && event.detail.successful) { this.reset(); this.querySelectorAll('select[hx-get]').forEach(function (s) { htmx.trigger(s, 'change'); }); }">
-  <input class="title-input" name="title" placeholder="What's happening?" required autocomplete="off">
+<details class="declare-panel"{% if core_error %} open{% endif %}><summary class="btn btn-primary">Declare incident</summary>
+<form class="create" method="post" action="/incidents{% if request.url.query %}?{{ request.url.query }}{% endif %}" hx-post="/incidents{% if request.url.query %}?{{ request.url.query }}{% endif %}" hx-target="main" hx-swap="innerHTML">
+  <label class="field-block create-title"><span>Incident title</span><input class="title-input" name="title" maxlength="300" placeholder="What's happening?" required autocomplete="off"></label>
   {% if incident_types %}
-  <select name="incident_type_id" aria-label="Type"
+  <label class="field-block"><span>Incident type</span><select name="incident_type_id"
           hx-get="/incidents/type-options" hx-target="#type-driven" hx-swap="innerHTML" hx-trigger="change">
     {% for t in incident_types %}<option value="{{ t.id }}"{{ ' selected' if t.id == default_incident_type_id }}>{{ t.label }}</option>{% endfor %}
-  </select>
+  </select></label>
   {% endif %}
   <span id="type-driven">
-  <select id="sev-select" name="severity_level_id" aria-label="Severity">
+  <label class="field-block"><span>Severity</span><select id="sev-select" name="severity_level_id">
     {% for lvl in severity_levels %}<option value="{{ lvl.id }}" {{ 'selected' if lvl.id == default_severity_level_id }}>{{ lvl.label }}</option>{% endfor %}
-  </select>
+  </select></label>
   <div id="custom-fields">{% include "partials/custom_field_inputs.html" %}</div>
   </span>
-  <textarea name="description" placeholder="Description (Markdown supported)"></textarea>
+  <label class="field-block create-description"><span>Description</span><textarea name="description" placeholder="What do responders need to know? Markdown supported."></textarea></label>
   {% if systems %}
-  <select name="system_id" aria-label="System"
+  <label class="field-block"><span>Affected system</span><select name="system_id"
           hx-get="/incidents/component-options" hx-target="#create-components"
           hx-swap="innerHTML" hx-trigger="change">
     <option value="">No system</option>
     {% for s in systems %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
-  </select>
-  <select id="create-components" name="component_ids" multiple aria-label="Affected components"></select>
+  </select></label>
+  <select id="create-components" name="component_ids" multiple aria-label="Affected components">{% for component in draft_components | default([]) %}<option value="{{ component.id }}">{{ component.name }}</option>{% endfor %}</select>
   {% endif %}
-  <label class="check"><input type="checkbox" name="is_private" value="true"> Private</label>
+  <label class="check"><input type="checkbox" name="is_private" value="true"> Private — visible to the creator, admins and assigned incident roles</label>
   {% if slack_connections %}
   <select name="slack_connection_id" aria-label="Chat room">
     <option value="">No chat room</option>
@@ -48,9 +45,20 @@
     {% if google_configured %}<option value="meet">Google Meet</option>{% endif %}
   </select>
   <button class="btn btn-primary" type="submit">Declare incident</button>
-</form>
+</form></details>
 {% endif %}
 
+{% set active_filter_count = (1 if filters.q else 0) + (1 if filters.status else 0) + (1 if filters.severity else 0) + (1 if filters.system else 0) %}
+<details class="board-filter-panel" open data-filter-count="{{ active_filter_count }}">
+<summary>Filters <span class="muted">{{ active_filter_count }} active</span></summary>
+<form method="get" action="/" class="board-filters">
+  <label>Search<input type="search" name="q" value="{{ filters.q }}" placeholder="Incident title"></label>
+  <label>Status<select name="status"><option value="">All statuses</option>{% for level in status_levels %}<option value="{{ level.id }}"{% if filters.status == level.id|string %} selected{% endif %}>{{ level.label }}</option>{% endfor %}</select></label>
+  <label>Severity<select name="severity"><option value="">All severities</option>{% for level in severity_levels %}<option value="{{ level.id }}"{% if filters.severity == level.id|string %} selected{% endif %}>{{ level.label }}</option>{% endfor %}</select></label>
+  <label>System<select name="system"><option value="">All systems</option>{% for system in systems %}<option value="{{ system.id }}"{% if filters.system == system.id|string %} selected{% endif %}>{{ system.name }}</option>{% endfor %}</select></label>
+  <button class="btn" type="submit">Apply filters</button><a class="btn btn-ghost" href="/">Clear</a>
+</form>
+</details>
 <div class="incident-list" id="incident-list">
   {% for i in incidents %}{% include "partials/incident_row.html" %}{% endfor %}
   <div class="empty">No incidents. The board is quiet.</div>

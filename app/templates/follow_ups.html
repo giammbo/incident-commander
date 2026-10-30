@@ -1,27 +1,36 @@
 {% extends "base.html" %}
 {% block content %}
+{% set role = effective_role(current_user) %}
+{% set can_manage = role and role.value in ("admin", "incident_commander") %}
 <div class="page-head">
   <h1>Follow-ups</h1>
-  <span class="stats"><b>{{ items | length }}</b> open</span>
+  <span class="stats"><b>{{ items | length }}</b> {{ filter_status }}</span>
 </div>
-<p class="page-sub">Every open action item across all incidents — assign owners and due dates, and close them out.</p>
+<nav class="range" aria-label="Follow-up status">{% for state in ['open', 'completed', 'cancelled', 'all'] %}<a href="/follow-ups?status={{ state }}"{% if filter_status == state %} class="active" aria-current="page"{% endif %}>{{ state | capitalize }}</a>{% endfor %}</nav>
+<p class="page-sub">Track action items across incidents. Assign owners, set due dates and keep their status current.</p>
 {% if items %}
 <div class="incident-list">
   {% for f in items %}
   <div class="incident" style="--sev-color: var(--sev2)">
-    <span class="status" data-status="active"><span class="dot"></span>open</span>
+    <span class="status" data-status="{{ "active" if f.is_open else "closed" }}"><span class="dot"></span>{{ f.status }}</span>
     <div class="inc-main">
       <div class="inc-title">{{ f.title }}</div>
       <div class="inc-meta">
-        <a class="chip" href="/incidents/{{ f.incident_id }}">{{ f.incident.title }}</a>
+        <a class="chip" href="/incidents/{{ f.incident_id }}?tab=followups">{{ f.incident.title }}</a>
         <span>{{ f.assignee.name if f.assignee else "unassigned" }}</span>
-        {% if f.due_on %}<span>· due {{ f.due_on.strftime("%b %d") }}</span>{% endif %}
+        {% if f.due_on %}<span>{{ "Overdue" if f.is_open and f.due_on < today else "Due" }} {{ f.due_on.strftime("%d %b %Y") }}</span>{% endif %}
       </div>
+      {% if can_manage %}
+      {% with return_tab="global" %}{% include "partials/followup_edit.html" %}{% endwith %}
+      <div class="action-row">{% for status, label in ([("completed", "Complete"), ("cancelled", "Cancel")] if f.is_open else [("open", "Reopen")]) %}
+        <form method="post" action="/followups/{{ f.id }}/status"><input type="hidden" name="return_tab" value="global"><input type="hidden" name="return_filter" value="{{ filter_status }}"><input type="hidden" name="status" value="{{ status }}"><button class="btn btn-sm" type="submit">{{ label }}</button></form>
+      {% endfor %}</div>
+      {% endif %}
     </div>
   </div>
   {% endfor %}
 </div>
 {% else %}
-<div class="empty">No open follow-ups. 🎉</div>
+<div class="empty">No follow-ups match this view.</div>
 {% endif %}
 {% endblock %}

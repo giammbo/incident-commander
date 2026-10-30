@@ -1,0 +1,10 @@
+{% if filter_error %}<div class="flash error" role="alert">{{ filter_error }}</div>{% endif %}
+<form method="get" class="catalog-filters form-row" role="search">
+  <label class="field-block grow"><span>Search {{ catalog_kind }}</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Name or description"></label>
+  {% if catalog_kind == 'components' %}
+  <label class="field-block"><span>System</span><select name="system_id"><option value="">All systems</option>{% for s in all_systems %}<option value="{{ s.id }}"{% if filters.system_id == s.id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+  {% endif %}
+  <label class="field-block"><span>Owner team</span><select name="team_id"><option value="">All teams</option>{% for t in teams %}<option value="{{ t.id }}"{% if filters.team_id == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></label>
+  <button class="btn" type="submit">Filter</button><a class="btn" href="/{{ catalog_kind }}">Clear filters</a>
+</form>
+<p class="muted">{{ pagination.total }} {{ catalog_kind }} found · Page {{ pagination.page }} of {{ pagination.pages }}</p>

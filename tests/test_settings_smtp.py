@@ -18,7 +18,10 @@ def _admin(client, db_session):
     _, pw = bootstrap_admin(db_session, "admin@localhost")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
 
 def test_save_smtp_and_keep_password(client, db_session):

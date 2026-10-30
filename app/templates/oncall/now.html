@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% from "oncall/_page_badges.html" import status_badge, urgency_badge, age, ack_button, paging_line %}
+{% block content %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('now', current_user) }}
+<div class="page-head"><h1>On-call now</h1>
+</div>
+<p class="page-sub">Who is on call right now, until when, and who takes over next.</p>
+
+{% if cards %}
+<div class="oc-grid">
+  {% for c in cards %}
+  <div class="card oc-card">
+    <h2><a href="/oncall/schedules/{{ c.schedule.id }}">{{ c.schedule.name }}</a></h2>
+    {% if c.current %}
+    <div class="oc-who">{{ c.current | join(', ') }}</div>
+    <div class="muted">until {{ c.until | localdt(c.schedule.timezone) }}{% if c.source == 'override' %} · override{% endif %}</div>
+    {% else %}
+    <div class="oc-who oc-nobody">Nobody on call</div>
+    {% endif %}
+    {% if c.next_at %}
+    <div class="oc-next">Next: <strong>{{ c.next_user or 'nobody' }}</strong>
+      <span class="muted">from {{ c.next_at | localdt(c.schedule.timezone) }}</span></div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><p class="muted">No schedules yet. <a href="/oncall/schedules">Create one</a>.</p></div>
+{% endif %}
+
+<div class="card" id="open-escalations">
+  <h2>Open escalations</h2>
+  {% if escalations %}
+  <ul class="pg-list">
+    {% for e in escalations %}
+    <li>
+      <div class="pg-line">{{ status_badge(e) }} {{ urgency_badge(e) }} {{ age(e) }} <span class="muted">{{ e.created_at | time_tag }}</span></div>
+      <div><a href="/oncall/escalations/{{ e.id }}">{{ e.title }}</a></div>
+      <div class="pg-line">
+        <span class="pg-who">{{ paging_line(e, paged[e.id].paged) }}</span>
+        <span class="pg-row-actions">{{ ack_button(e, paged[e.id], '/oncall') }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  <p><a href="/oncall/escalations">All escalations</a></p>
+  {% else %}<p class="muted">No open escalations.</p>{% endif %}
+</div>
+{% endblock %}

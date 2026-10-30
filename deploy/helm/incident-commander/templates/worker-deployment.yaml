@@ -1,0 +1,38 @@
+{{- if .Values.oncall.worker.separate }}
+{{- include "ic.requireSecrets" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ic.fullname" . }}-worker
+  labels: {{- include "ic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.oncall.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ic.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "ic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      serviceAccountName: {{ include "ic.fullname" . }}
+      initContainers:
+        - name: await-db
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["await-db"]
+          env: {{- include "ic.env" . | nindent 12 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker"]
+          env:
+            {{- include "ic.env" . | nindent 12 }}
+            - name: ONCALL_WORKER_IN_PROCESS
+              value: "false"
+          resources: {{- toYaml .Values.oncall.worker.resources | nindent 12 }}
+{{- end }}

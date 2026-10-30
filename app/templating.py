@@ -58,3 +58,57 @@ def _timeago(dt) -> str:
 
 
 templates.env.filters["timeago"] = _timeago
+
+
+def _localdt(dt, tzname: str | None, fmt: str = "%a %d %b %H:%M") -> str:
+    """Render an instant in the given IANA zone, e.g. 'Tue 28 Oct 09:00 Europe/Rome'."""
+    if not dt:
+        return "—"
+    from datetime import UTC
+    from zoneinfo import ZoneInfo
+
+    d = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    if not tzname:
+        return d.astimezone(UTC).strftime(fmt) + " UTC"
+    return d.astimezone(ZoneInfo(tzname)).strftime(fmt) + f" {tzname}"
+
+
+templates.env.filters["localdt"] = _localdt
+
+
+def _openfor(dt) -> str:
+    """Age of an open item: 'open for 5m' (the browser refreshes it, see base.html)."""
+    if not dt:
+        return "—"
+    from datetime import UTC, datetime
+
+    d = dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+    secs = max(0, (datetime.now(UTC) - d).total_seconds())
+    if secs < 60:
+        return "open for <1m"
+    if secs < 3600:
+        return f"open for {int(secs // 60)}m"
+    if secs < 86400:
+        h, m = int(secs // 3600), int(secs % 3600 // 60)
+        return f"open for {h}h {m}m" if m else f"open for {h}h"
+    return f"open for {int(secs // 86400)}d"
+
+
+templates.env.filters["openfor"] = _openfor
+
+
+def _time_tag(dt, fmt: str = "%a %d %b %H:%M", seconds: bool = False):
+    """<time datetime=ISO>UTC fallback</time>; base.html rewrites it to browser-local time."""
+    from datetime import UTC
+
+    from markupsafe import Markup, escape
+
+    if not dt:
+        return "—"
+    d = (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).astimezone(UTC)
+    iso = d.strftime("%Y-%m-%dT%H:%M:%SZ")
+    attr = " data-seconds" if seconds else ""
+    return Markup(f'<time datetime="{iso}"{attr}>{escape(d.strftime(fmt))} UTC</time>')
+
+
+templates.env.filters["time_tag"] = _time_tag

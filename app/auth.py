@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import quote, unquote, urlsplit
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +36,47 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User | 
 _PASSWORD_CHANGE_EXEMPT_PATHS = frozenset({"/account/password", "/logout"})
 
 
+def safe_next(value: str | None) -> str:
+    """Accept local destinations only, including after URL decoding by a browser."""
+    if not value or len(value) > 2048:
+        return "/"
+    decoded = value
+    for _ in range(5):
+        if (
+            not decoded.startswith("/")
+            or decoded.startswith("//")
+            or "\\" in decoded
+            or any(ord(char) < 32 or ord(char) == 127 for char in decoded)
+        ):
+            return "/"
+        try:
+            parts = urlsplit(decoded)
+        except ValueError:
+            return "/"
+        if parts.scheme or parts.netloc or any(p in {".", ".."} for p in parts.path.split("/")):
+            return "/"
+        path = parts.path.rstrip("/")
+        if path in {
+            "/login",
+            "/logout",
+            "/account/password",
+            "/auth/oidc/callback",
+        } or path.startswith("/login/"):
+            return "/"
+        expanded = unquote(decoded)
+        if expanded == decoded:
+            return value
+        decoded = expanded
+    return "/"
+
+
+def requested_destination(request: Request) -> str:
+    target = request.url.path
+    if request.url.query:
+        target += "?" + request.url.query
+    return safe_next(target)
+
+
 def _redirect(request: Request, location: str) -> None:
     # For HTMX requests, a 303 body would get swapped into the target element; use the
     # HX-Redirect header so the browser does a full-page redirect instead.
@@ -46,8 +89,12 @@ def _redirect(request: Request, location: str) -> None:
 
 def require_user(request: Request, user: User | None = Depends(get_current_user)) -> User:
     if user is None:
-        _redirect(request, "/login")
+        target = requested_destination(request) if request.method == "GET" else "/"
+        location = "/login" if target == "/" else "/login?next=" + quote(target, safe="")
+        _redirect(request, location)
     if user.must_change_password and request.url.path not in _PASSWORD_CHANGE_EXEMPT_PATHS:
+        if request.method == "GET":
+            request.session["login_next"] = requested_destination(request)
         _redirect(request, "/account/password")
     return user
 

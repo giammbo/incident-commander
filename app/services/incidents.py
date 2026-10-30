@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Incident, IntegrationState, StatusCategory, StatusLevel
+from app.models import Incident, IntegrationState, StatusCategory, StatusLevel, User
 
 _UNSET = object()
 
@@ -18,9 +18,26 @@ def _scoped_components(db, system_id, component_ids):
     if system_id is None:
         raise ValueError("Pick a system before selecting components")
     comps = list(db.scalars(select(Component).where(Component.id.in_(ids))))
+    if len({component.id for component in comps}) != len(set(ids)):
+        raise ValueError("Choose existing affected components")
     if any(c.system_id != system_id for c in comps):
         raise ValueError("Selected components must belong to the chosen system")
     return comps
+
+
+def _validate_catalog_choices(db, **choices):
+    from app.models import IncidentType, SeverityLevel, SlackConnection, System
+
+    catalogs = {
+        "severity": SeverityLevel,
+        "system": System,
+        "incident type": IncidentType,
+        "status": StatusLevel,
+        "Slack workspace": SlackConnection,
+    }
+    for label, selected_id in choices.items():
+        if selected_id is not None and db.get(catalogs[label], selected_id) is None:
+            raise ValueError(f"Choose an existing {label}")
 
 
 def create_incident(
@@ -42,6 +59,11 @@ def create_incident(
     from app.services.incident_types import default_incident_type_id
     from app.services.statuses import default_status_level_id
 
+    title = title.strip()
+    if not title:
+        raise ValueError("Title is required")
+    if len(title) > 300:
+        raise ValueError("Title must be 300 characters or fewer")
     if incident_type_id is None:
         incident_type_id = default_incident_type_id(db)
     if severity_level_id is None:
@@ -49,6 +71,16 @@ def create_incident(
         severity_level_id = (
             itype.default_severity_level_id if itype else None
         ) or default_severity_level_id(db)
+    _validate_catalog_choices(
+        db,
+        severity=severity_level_id,
+        system=system_id,
+        **{
+            "incident type": incident_type_id,
+            "status": status_id,
+            "Slack workspace": slack_connection_id,
+        },
+    )
     components = _scoped_components(db, system_id, component_ids)
     inc = Incident(
         title=title.strip(),
@@ -75,8 +107,12 @@ def create_incident(
     return inc
 
 
-def list_incidents(db: Session) -> list[Incident]:
+def list_incidents(db: Session, *, user: User | None = None) -> list[Incident]:
     stmt = select(Incident).order_by(Incident.created_at.desc(), Incident.id.desc())
+    if user is not None:
+        from app.services.incident_access import visible_incident_condition
+
+        stmt = stmt.where(visible_incident_condition(user))
     return list(db.scalars(stmt))
 
 
@@ -91,8 +127,21 @@ def update_incident(
     component_ids=_UNSET,
     incident_type_id=_UNSET,
 ):
+    choices = {
+        "severity": severity_level_id,
+        "system": system_id,
+        "incident type": incident_type_id,
+    }
+    _validate_catalog_choices(
+        db, **{key: value for key, value in choices.items() if value is not _UNSET}
+    )
     if title is not _UNSET:
-        incident.title = title.strip()
+        title = title.strip()
+        if not title:
+            raise ValueError("Title is required")
+        if len(title) > 300:
+            raise ValueError("Title must be 300 characters or fewer")
+        incident.title = title
     if description is not _UNSET:
         incident.description = description
     if severity_level_id is not _UNSET:
@@ -108,6 +157,30 @@ def update_incident(
         incident.incident_type_id = incident_type_id
     db.flush()
     return incident
+
+
+def _resolve_linked_escalations(db: Session, incident, by_user: int) -> None:
+    """Closing an incident stops the paging of its manual escalations."""
+    from datetime import UTC, datetime
+
+    from app.models import Escalation, EscalationStatus
+    from app.services import oncall_engine
+
+    open_states = [
+        EscalationStatus.triggered,
+        EscalationStatus.acknowledged,
+        EscalationStatus.exhausted,
+    ]
+    escs = db.scalars(
+        select(Escalation).where(
+            Escalation.incident_id == incident.id,
+            Escalation.source == "manual",
+            Escalation.status.in_(open_states),
+        )
+    ).all()
+    now = datetime.now(UTC)
+    for esc in escs:
+        oncall_engine.resolve(db, esc, user_id=by_user, via="incident_closed", now=now)
 
 
 def set_incident_status(db: Session, incident, *, status_id: int, by_user: int) -> str:
@@ -128,6 +201,7 @@ def set_incident_status(db: Session, incident, *, status_id: int, by_user: int) 
         incident.closed_by = by_user
         kind = "closed"
         log_event(db, incident, entry_type="closed", body="Incident closed.", created_by=by_user)
+        _resolve_linked_escalations(db, incident, by_user)
     elif was_closed and not now_closed:
         incident.closed_at = None
         incident.closed_by = None

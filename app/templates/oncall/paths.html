@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('paths', current_user) }}
+<div class="page-head"><h1>Escalation paths</h1></div>
+<p class="page-sub">Who gets notified, in what order, and how long to wait for an acknowledgement.</p>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+
+<div class="card">
+  {% if paths %}
+  <table class="tbl">
+    <thead><tr><th>Name</th><th>Levels</th><th>Repeat</th><th></th></tr></thead>
+    <tbody>
+      {% for p in paths %}
+      <tr>
+        <td><a href="/oncall/escalation-paths/{{ p.id }}">{{ p.name }}</a></td>
+        <td>{{ p.levels | length }}</td>
+        <td class="muted">{{ p.repeat_times }}</td>
+        <td>
+          {% if can_manage %}
+          <form method="post" action="/oncall/escalation-paths/{{ p.id }}/delete" style="display:inline">
+            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ p.name|tojson }} + "?")'>Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No escalation paths yet.</p>{% endif %}
+
+  {% if can_manage %}
+  <h3 style="margin:16px 0 10px">Add escalation path</h3>
+  <form method="post" action="/oncall/escalation-paths">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120" value="{{ draft.get('name', '') }}"></label>
+      <label class="field-block"><span>Repeat (0-10 times)</span><input name="repeat_times" type="number" min="0" max="10" value="{{ draft.get('repeat_times', 0) }}"></label>
+      <label class="field-block"><span>Team</span>
+        <select name="team_id"><option value="">—</option>
+          {% for t in teams %}<option value="{{ t.id }}"{% if draft.get('team_id') == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <button class="btn btn-primary" type="submit">Add path</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

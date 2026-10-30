@@ -25,6 +25,8 @@ def create_followup(
     title = (title or "").strip()
     if not title:
         raise ValueError("Title is required")
+    if len(title) > 300:
+        raise ValueError("Title must be 300 characters or fewer")
     fu = FollowUp(
         incident_id=incident.id,
         title=title,
@@ -46,6 +48,8 @@ def update_followup(db, followup, *, title, description, assignee_id, due_on):
     title = (title or "").strip()
     if not title:
         raise ValueError("Title is required")
+    if len(title) > 300:
+        raise ValueError("Title must be 300 characters or fewer")
     followup.title = title
     followup.description = description
     followup.assignee_id = _resolve_assignee(db, assignee_id)
@@ -90,14 +94,21 @@ def list_followups(incident) -> list[FollowUp]:
     return sorted(incident.follow_ups, key=lambda f: (f.status != "open", f.created_at))
 
 
-def list_open_followups(db) -> list[FollowUp]:
-    return list(
-        db.scalars(
-            select(FollowUp)
-            .where(FollowUp.status == "open")
-            .order_by(FollowUp.incident_id, FollowUp.created_at)
-        )
+def list_open_followups(db, *, user: User | None = None, status: str = "open") -> list[FollowUp]:
+    stmt = (
+        select(FollowUp)
+        .where(FollowUp.status == "open")
+        .order_by(FollowUp.incident_id, FollowUp.created_at)
     )
+    if status != "open":
+        stmt = select(FollowUp).order_by(FollowUp.incident_id, FollowUp.created_at)
+        if status in _STATES:
+            stmt = stmt.where(FollowUp.status == status)
+    if user is not None:
+        from app.services.incident_access import visible_incident_condition
+
+        stmt = stmt.where(FollowUp.incident.has(visible_incident_condition(user)))
+    return list(db.scalars(stmt))
 
 
 def open_count(incident) -> int:

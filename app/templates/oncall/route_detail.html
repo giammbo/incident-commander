@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% from "oncall/route_form.html" import fields %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('routes', current_user) }}
+<div class="page-head"><h1>{{ route.name }}</h1></div>
+<p class="page-sub">{{ sentence }}{% if not route.enabled %} (disabled){% endif %}</p>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+<div class="card">
+  {% if can_manage %}
+  <form method="post" action="/oncall/routes/{{ route.id }}/edit">
+    {{ fields(route, paths, route_fields, cond_rows, high_rows, urgency_mode, draft) }}
+    <button class="btn btn-primary" type="submit">Save route</button>
+  </form>
+  {% else %}<p class="muted">Only admins and incident commanders can edit routes.</p>{% endif %}
+</div>
+{% endblock %}

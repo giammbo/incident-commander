@@ -13,6 +13,8 @@ os.environ.setdefault("BASE_URL", "http://testserver")
 # TestClient talks plain HTTP, so a Secure session cookie would never be sent
 # back. Match the documented local-dev posture for the test suite.
 os.environ.setdefault("SESSION_HTTPS_ONLY", "false")
+# No test starts the on-call background thread unless it asks for it.
+os.environ.setdefault("ONCALL_WORKER_IN_PROCESS", "false")
 
 from testcontainers.postgres import PostgresContainer  # noqa: E402
 

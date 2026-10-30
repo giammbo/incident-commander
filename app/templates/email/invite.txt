@@ -1,6 +1,6 @@
-You've been invited to Incident Commander.
+{% if password_reset %}An administrator requested a password reset for your Incident Commander account. Your current password is unchanged until you use this link.{% else %}You've been invited to Incident Commander.{% endif %}
 
-Set your password and activate your account:
+{{ 'Set a new password' if password_reset else 'Set your password and activate your account' }}:
 {{ accept_url }}
 
 This link expires in {{ ttl_hours }} hours. If you weren't expecting this, ignore this email.

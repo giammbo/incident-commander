@@ -1,0 +1,30 @@
+{# Status / urgency / age badges for a page (escalation). Colors: --sev1 red, --sev2 amber, --ok green. #}
+{% macro status_badge(e, big=false) -%}
+<span class="pg-badge pg-{{ e.status.value }}{% if big %} pg-big{% endif %}">{{ e.status.value }}</span>
+{%- if e.status.value == 'exhausted' %} <span class="pg-hint">stopped paging</span>{% endif %}
+{%- endmacro %}
+
+{# "Paging: Ann" while a page is live, "Paged: Ann" once acked/resolved/exhausted. #}
+{% macro paging_line(e, names) -%}
+{%- if names -%}{{ 'Paging' if e.status.value == 'triggered' else 'Paged' }}: {{ names | join(', ') }}
+{%- elif e.status.value == 'exhausted' -%}Stopped paging
+{%- else -%}Nobody paged yet{%- endif -%}
+{%- endmacro %}
+
+{% macro urgency_badge(e) -%}
+<span class="pg-badge pg-urgency-{{ e.urgency.value }}">{{ e.urgency.value }} urgency</span>
+{%- endmacro %}
+
+{% macro age(e) -%}
+{% if e.status.value != 'resolved' %}<span class="pg-age" data-since="{{ e.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ e.created_at | openfor }}</span>{% else %}<span class="pg-age">{{ e.created_at | timeago }}</span>{% endif %}
+{%- endmacro %}
+
+{# Inline Acknowledge for list rows: returns to `back` (one of the fixed on-call list pages). #}
+{% macro ack_button(e, info, back) -%}
+{% if info and info.can_ack %}
+<form method="post" action="/oncall/escalations/{{ e.id }}/ack">
+  <input type="hidden" name="return_to" value="{{ back }}">
+  <button class="btn btn-sm btn-primary" type="submit">Acknowledge</button>
+</form>
+{% endif %}
+{%- endmacro %}

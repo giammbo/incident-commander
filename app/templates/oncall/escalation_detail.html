@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% from "oncall/_page_badges.html" import status_badge, urgency_badge, age, paging_line %}
+{% block content %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('escalations', current_user) }}
+<div class="page-head"><h1>{{ esc.title }}</h1></div>
+<div class="card">
+  <div class="pg-line">{{ status_badge(esc, true) }} {{ urgency_badge(esc) }} {{ age(esc) }}</div>
+  <p class="muted">{{ 'Alert route' if esc.source == 'alert_route' else 'Manual page' }}
+    · code <code>{{ esc.short_code }}</code></p>
+  {% if paged or esc.status.value == 'exhausted' %}<p><strong>{{ paging_line(esc, paged) }}</strong></p>{% endif %}
+  <p class="muted">Started {{ esc.created_at | time_tag }}{% if esc.initiated_by %} by {{ names.get(esc.initiated_by, '?') }}{% endif %}
+    {% if path %} · path <a href="/oncall/escalation-paths/{{ path.id }}">{{ path.name }}</a>{% endif %}
+    · level {{ esc.current_level + 1 }}{% if esc.repeat_count %} · repeat {{ esc.repeat_count }}{% endif %}</p>
+  {% if esc.message %}<p>{{ esc.message }}</p>{% endif %}
+  {% if alert %}<p>Alert: <a href="/alerts">{{ alert.title }}</a>
+    {% if alert.paging_error %}<span class="chip chip-danger">paging failed: {{ alert.paging_error }}</span>{% endif %}</p>{% endif %}
+  {% if incident %}<p>Incident: <a href="/incidents/{{ incident.id }}">{{ incident.title }}</a></p>{% endif %}
+  {% if esc.acked_at %}<p class="muted">Acknowledged by {{ names.get(esc.acked_by, 'the system') }} {{ esc.acked_at | time_tag }}</p>{% endif %}
+  {% if esc.resolved_at %}<p class="muted">Resolved by {{ names.get(esc.resolved_by, 'the system') }} {{ esc.resolved_at | time_tag }}</p>{% endif %}
+
+  <div class="pg-actions">
+    {% set ackable = esc.status.value in ('triggered', 'exhausted') %}
+    {% if can_act and is_open and ackable %}
+    <form method="post" action="/oncall/escalations/{{ esc.id }}/ack"><button class="btn btn-primary btn-lg">Acknowledge</button></form>{% endif %}
+    {% if can_act and is_open %}
+      {% if esc.status.value == 'triggered' %}
+      <form method="post" action="/oncall/escalations/{{ esc.id }}/escalate"><button class="btn btn-sm">Escalate now</button></form>{% endif %}
+      <form method="post" action="/oncall/escalations/{{ esc.id }}/resolve"><button class="btn btn-sm">Resolve</button></form>
+    {% endif %}
+
+  </div>
+  {% if is_ic and alert and not incident and not alert.incident_id %}
+  <details{% if core_error %} open{% endif %}>
+    <summary>Declare incident</summary>
+    <form method="post" action="/oncall/escalations/{{ esc.id }}/declare">
+      <label class="field-block"><span>Incident severity</span>
+        <select name="severity_level_id" required><option value="">Choose severity…</option>{% for level in severity_levels %}<option value="{{ level.id }}">{{ level.label }}</option>{% endfor %}</select>
+      </label>
+      {% include "partials/custom_field_inputs.html" %}
+      <button class="btn btn-primary" type="submit">Declare incident</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+
+<div class="card"><h2>Notified</h2>
+  {% if levels %}
+  {% for lvl, jobs in levels %}
+  <h3>Level {{ lvl + 1 }}</h3>
+  {% set shown = jobs | rejectattr('status', 'equalto', 'skipped') | list %}
+  {% set skipped = jobs | selectattr('status', 'equalto', 'skipped') | list %}
+  {% if shown %}
+  <table class="tbl"><tbody>
+    {% for j in shown %}
+    <tr><td>{{ names.get(j.user_id, '?') }}</td><td>{{ channel_labels.get(j.channel, j.channel) if j.channel else '—' }}</td>
+      <td><span class="chip{% if j.status == 'failed' %} chip-danger{% endif %}">{{ j.status }}</span></td>
+      <td class="muted">{{ j.detail or '' }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+  {% if skipped %}
+  <details class="pg-skipped"><summary>{{ skipped | length }} skipped</summary>
+    <table class="tbl"><tbody>
+      {% for j in skipped %}
+      <tr><td>{{ names.get(j.user_id, '?') }}</td><td>{{ channel_labels.get(j.channel, j.channel) if j.channel else '—' }}</td>
+        <td><span class="chip">skipped</span></td><td>{{ j.detail or '' }}</td></tr>
+      {% endfor %}
+    </tbody></table>
+  </details>
+  {% endif %}
+  {% endfor %}
+  {% else %}<p class="muted">Nobody has been notified yet.</p>{% endif %}
+</div>
+
+{% if pending %}
+<div class="card"><h2>Coming up</h2>
+  <ul>{% for j in pending %}
+    <li>{% if j.kind == 'level' %}Next: Level {{ (j.level or 0) + 1 }} at {{ j.run_at | time_tag }} if nobody acknowledges
+      {%- elif j.kind == 'notify' %}{{ channel_labels.get(j.channel, j.channel or 'Notification') }} to {{ names.get(j.user_id, 'someone') }} at {{ j.run_at | time_tag }}
+      {%- elif j.kind == 'exhaust' %}Stop paging (exhausted) at {{ j.run_at | time_tag }}
+      {%- else %}{{ j.kind }} at {{ j.run_at | time_tag }}{% endif %}</li>
+  {% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="card"><h2>Event log</h2>
+  <ul>{% for ev in esc.events %}
+    <li><span class="muted">{{ ev.created_at | time_tag('%d %b %H:%M:%S', true) }}</span>
+      <strong>{{ ev.kind }}</strong> {{ ev.body }}</li>
+  {% endfor %}</ul>
+</div>
+{% endblock %}

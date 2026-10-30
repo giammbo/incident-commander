@@ -1,32 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>Groups</h1><span class="stats">{{ groups | length }} total</span></div>
-<p class="page-sub">Group-based access control — organize users and assign Admin, Incident Commander or Read-only roles.</p>
-
+<p class="page-sub">Group roles determine member access. Editing a group keeps its members and identity.</p>
+{% if error %}<div class="card" role="alert" tabindex="-1">{{ error }}</div>{% endif %}
 <div class="card">
   <h2>New group</h2>
   <form class="form-row" method="post" action="/groups">
-    <input class="grow" name="name" placeholder="group name" required autocomplete="off">
-    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r.value }}">{{ r.value }}</option>{% endfor %}</select>
+    <label class="field-block grow"><span>Group name</span><input name="name" value="{{ draft.name if draft and not draft.id else '' }}" required maxlength="120" autocomplete="off"></label>
+    <label class="field-block"><span>Access role</span><select name="role">{% for r in roles|reverse %}<option value="{{ r.value }}" {{ 'selected' if draft and not draft.id and draft.role == r.value else '' }}>{{ r.value|replace('_', ' ')|title }}</option>{% endfor %}</select></label>
     <button class="btn btn-primary" type="submit">Create group</button>
   </form>
 </div>
-
 <div class="card">
   <h2>Existing groups</h2>
-  <table>
-    <thead><tr><th>Name</th><th>Role</th><th>Type</th></tr></thead>
-    <tbody>
-    {% for g in groups %}
-      <tr>
-        <td>{{ g.name }}</td>
-        <td><span class="role" data-role="{{ g.role.value }}">{{ g.role.value }}</span></td>
-        <td>{% if g.is_system %}<span class="muted">system</span>{% else %}custom{% endif %}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  {% for g in groups %}
+  <div class="record-editor">
+    <h3>{{ g.name }} <span class="role" data-role="{{ g.role.value }}">{{ g.role.value|replace('_', ' ')|title }}</span></h3>
+    <p class="muted">{{ g.members|length }} members · {{ 'System' if g.is_system else 'Custom' }}{% if protected_group(g) %} · Protected admin authority{% endif %}</p>
+    {% if not protected_group(g) %}
+    <details {{ 'open' if draft.id == g.id else '' }}><summary>Edit {{ g.name }}</summary>
+      <form class="form-row" method="post" action="/groups/{{ g.id }}/edit">
+        <label class="field-block grow"><span>Group name</span><input name="name" value="{{ draft.name if draft.id == g.id else g.name }}" maxlength="120" required></label>
+        <label class="field-block"><span>Access role</span><select name="role">{% for r in roles %}<option value="{{ r.value }}" {{ 'selected' if (draft.role if draft.id == g.id else g.role.value) == r.value else '' }}>{{ r.value|replace('_', ' ')|title }}</option>{% endfor %}</select></label>
+        <button class="btn btn-primary" type="submit">Save group</button>
+      </form>
+    </details>
+    {% if not g.is_system %}<form method="post" action="/groups/{{ g.id }}/delete" onsubmit="return confirm('Delete this group? Groups with members must be reassigned first.')"><button class="btn btn-sm" type="submit">Delete {{ g.name }}</button></form>{% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+  <p class="muted">Deletion is blocked for system groups, protected admin groups and groups with members.</p>
 </div>
-
 <p><a class="backlink" href="/users">← Back to users</a></p>
 {% endblock %}

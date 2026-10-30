@@ -4,16 +4,36 @@
 <div class="page-head"><h1>Automations</h1></div>
 <p class="page-sub">Trigger → conditions → actions rules that run automatically on incident and alert events.</p>
 
-<div class="incident-list" style="margin-bottom:24px">
+<div class="rule-list" style="margin-bottom:24px">
   {% for r in rules %}
-  <div class="incident rule-row" data-status="{{ 'active' if r.enabled else 'closed' }}" style="--sev-color: var(--ink-3)">
-    <span class="role" title="{{ r.trigger }}">{{ "on" if r.enabled else "off" }}</span>
+  <div class="card rule-row" id="rule-{{ r.id }}">
+    <span class="role" title="{{ r.trigger }}">{{ "Needs action" if not r.actions else "Enabled" if r.enabled else "Disabled" }}</span>
     <div class="inc-main"><div class="inc-title">{{ r.name }}</div>
       <div class="rule-summary">{{ summaries[r.id] }}</div></div>
+    <p class="muted">Last actual execution: {% if r.last_run_at %}<time datetime="{{ r.last_run_at.isoformat() }}">{{ r.last_run_at.strftime('%Y-%m-%d %H:%M UTC') }}</time> · {{ r.last_run_outcome }} · {{ r.last_run_summary }}{% else %}Not run yet{% endif %}</p>
     <span class="row-actions">
-      <form method="post" action="/automations/{{ r.id }}/toggle" style="display:inline"><button class="chip" type="submit">{{ "disable" if r.enabled else "enable" }}</button></form>
-      <form method="post" action="/automations/{{ r.id }}/delete" style="display:inline" onsubmit="return confirm('Delete this rule?')"><button class="chip" type="submit">delete</button></form>
+      <a class="btn btn-sm" href="/automations/{{ r.id }}/edit">Edit {{ r.name }}</a>
+      <form method="post" action="/automations/{{ r.id }}/toggle" style="display:inline"><button class="btn btn-sm" type="submit">{{ "disable" if r.enabled else "enable" }}</button></form>
+      <form method="post" action="/automations/{{ r.id }}/delete" style="display:inline" onsubmit="return confirm('Delete this rule? It will no longer run on future events.')"><button class="btn btn-sm" type="submit">delete</button></form>
     </span>
+    <details><summary>Local dry-run for {{ r.name }}</summary>
+      <p class="muted">Use synthetic values to check matching and action intent. Nothing is sent or changed.</p>
+      <form method="post" action="/automations/{{ r.id }}/preview">
+        <div class="form-row">
+        {% if r.trigger == 'alert.received' %}
+          <label class="field-block"><span>Sample source</span><input name="sample_source"></label>
+          <label class="field-block"><span>Sample severity (as sent)</span><input name="sample_severity_raw"></label>
+          <label class="field-block"><span>Sample status</span><select name="sample_status"><option value="firing">Firing</option><option value="resolved">Resolved</option></select></label>
+        {% else %}
+          <label class="field-block"><span>Sample severity</span><select name="sample_severity"><option value="">Unset</option>{% for s in severities %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}</select></label>
+          <label class="field-block"><span>Sample incident type</span><select name="sample_type"><option value="">Unset</option>{% for t in incident_types %}<option value="{{ t.id }}">{{ t.label }}</option>{% endfor %}</select></label>
+          <label class="field-block"><span>Sample system</span><select name="sample_system"><option value="">Unset</option>{% for id, label in sample_systems %}<option value="{{ id }}">{{ label }}</option>{% endfor %}</select></label>
+          <label class="check"><input type="checkbox" name="sample_private" value="true"> Sample is private</label>
+        {% endif %}
+        </div>
+        <button class="btn" type="submit">Preview without executing</button>
+      </form>
+    </details>
   </div>
   {% else %}<div class="empty">No automation rules yet.</div>{% endfor %}
 </div>
@@ -22,7 +42,7 @@
   <h2>New rule</h2>
   <form method="post" action="/automations" class="rule-editor">
     <div class="form-row" style="margin-bottom:12px">
-      <input class="grow" name="name" placeholder="Rule name" aria-label="Rule name" required>
+      <label class="field-block grow"><span>Rule name</span><input name="name" placeholder="Rule name" maxlength="200" required></label>
       <select name="trigger" aria-label="Trigger" hx-get="/automations/builder" hx-target="#rule-builder" hx-swap="innerHTML" hx-trigger="change" hx-include="this">
         {% for t, label in trigger_labels.items() %}<option value="{{ t }}"{% if t == trigger %} selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>

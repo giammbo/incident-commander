@@ -1,0 +1,9 @@
+{% macro oncall_worker_banner(state) %}
+{% if state %}
+<div class="oc-banner" role="alert">
+  <strong>The on-call worker is not running.</strong>
+  {% if state == 'never' %}It has not ticked yet.{% else %}Its last tick was over 2 minutes ago.{% endif %}
+  Escalations will not page anyone until it is back. See the README (On-call worker).
+</div>
+{% endif %}
+{% endmacro %}

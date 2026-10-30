@@ -20,7 +20,7 @@ def test_change_password_clears_flag(client, db_session):
     client.post("/login", data={"email": "admin@localhost", "password": pw}, follow_redirects=False)
     r = client.post(
         "/account/password",
-        data={"new_password": "Brand-New-1", "confirm": "Brand-New-1"},
+        data={"new_password": "Brand-New-1", "confirm": "Brand-New-1", "name": "Real Name"},
         follow_redirects=False,
     )
     assert r.status_code == 303
@@ -46,7 +46,7 @@ def test_must_change_password_redirects_protected_routes(client, db_session):
     # After changing the password the protected route is reachable normally.
     client.post(
         "/account/password",
-        data={"new_password": "Brand-New-1", "confirm": "Brand-New-1"},
+        data={"new_password": "Brand-New-1", "confirm": "Brand-New-1", "name": "Real Name"},
         follow_redirects=False,
     )
     assert client.get("/users", follow_redirects=False).status_code == 200

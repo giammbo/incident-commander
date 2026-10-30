@@ -117,9 +117,10 @@ def test_empty_message_flashes(client, db_session, monkeypatch):
     _login(client, db_session, "ic@x.io", Role.incident_commander)
     inc = _incident(db_session)
     db_session.commit()
+    db_session.commit()
     fired = []
     monkeypatch.setattr("app.routers.incidents.webhooks.notify", lambda *a, **k: fired.append(a[2]))
     r = client.post(f"/incidents/{inc.id}/updates", data={"message": "   "}, follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 422
     assert not _updates(db_session, inc)  # nothing recorded
     assert fired == []  # the empty-message path must not broadcast a webhook

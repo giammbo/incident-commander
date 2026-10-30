@@ -77,8 +77,9 @@ def test_ic_create_complete_reopen_delete(client, db_session):
 def test_empty_title_flashes_not_500(client, db_session):
     _login(client, db_session, "ic@x.io", Role.incident_commander)
     inc = _incident(db_session)
+    db_session.commit()
     r = client.post(f"/incidents/{inc.id}/followups", data={"title": "  "}, follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 422
     assert not _items(db_session, inc)
 
 

@@ -1,0 +1,15 @@
+{# Fixed on-call sub-navigation. `active` is one of: now, schedules, paths, routes, escalations (or '' for none). #}
+{% macro oncall_nav(active, user) -%}
+{% set _r = effective_role(user) %}
+<nav class="oc-tabs" aria-label="On-call">
+  {% for key, href, label in [
+    ('now', '/oncall', 'Now'),
+    ('schedules', '/oncall/schedules', 'Schedules'),
+    ('paths', '/oncall/escalation-paths', 'Escalation paths'),
+    ('routes', '/oncall/routes', 'Alert routes'),
+    ('escalations', '/oncall/escalations', 'Escalations')] %}
+  <a class="oc-tab{% if key == active %} active{% endif %}" href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+  {% if _r and _r.value in ("admin", "incident_commander") %}<a class="btn btn-sm btn-primary oc-tab-action" href="/oncall/page">Page someone</a>{% endif %}
+</nav>
+{%- endmacro %}

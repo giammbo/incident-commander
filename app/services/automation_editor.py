@@ -170,18 +170,84 @@ def build_condition(field: str, op: str, raw_values: list[str]) -> dict | None:
     return {"field": field, "op": op, "value": value} if value is not None else None
 
 
-def conditions_from_form(form) -> list[dict]:
-    """Parse the editor's indexed rows (``cond-<i>-field|op|value``)."""
+def condition_indexes(form):
+    return sorted(
+        {
+            int(k.split("-")[1])
+            for k in form
+            if k.startswith("cond-") and len(k.split("-")) == 3 and k.split("-")[1].isdigit()
+        }
+    )
+
+
+def parse_condition(field, op, raw_values, *, strict=True):
+    field, op = (field or "").strip(), op or "equals"
+    if not field:
+        return None
+    if strict:
+        if field not in FIELD_LABELS:
+            raise ValueError("Choose a valid condition field.")
+        if op not in OP_LABELS:
+            raise ValueError("Choose a valid condition operator.")
+        if field == "is_private":
+            if op != "equals" or any(
+                v.lower() not in ("true", "false", "1", "0", "on", "off", "yes", "no")
+                for v in raw_values
+            ):
+                raise ValueError("Choose whether the incident is private.")
+        elif field in (*_INT_FIELDS, "status"):
+            if not raw_values or op == "equals" and len(raw_values) != 1:
+                raise ValueError("Choose a value for the condition.")
+            if field in _INT_FIELDS and any(
+                not v.isascii() or not v.isdigit() or not 0 < int(v) <= 2147483647
+                for v in raw_values
+            ):
+                raise ValueError("Choose a valid catalog value for the condition.")
+            if field == "status" and any(v not in dict(ALERT_STATUSES) for v in raw_values):
+                raise ValueError("Choose Firing or Resolved for the alert status.")
+    return build_condition(field, op, raw_values)
+
+
+def conditions_from_form(form, *, strict=True) -> list[dict]:
+    """Parse selected rows for storage; error rendering binds original indexes separately."""
     out = []
-    for i in range(MAX_CONDITIONS):
-        cond = build_condition(
+    indexes = condition_indexes(form)
+    chosen = [i for i in indexes if form.get(f"cond-{i}-field", "").strip()]
+    if len(chosen) > 25 or any(i > 100 for i in indexes):
+        raise ValueError("Use 25 conditions or fewer, in rows 1 through 101.")
+    for i in indexes:
+        cond = parse_condition(
             form.get(f"cond-{i}-field", ""),
             form.get(f"cond-{i}-op", ""),
             form.getlist(f"cond-{i}-value"),
+            strict=strict,
         )
         if cond is not None:
             out.append(cond)
     return out
+
+
+def draft_condition_rows(form):
+    """Bind raw widgets by their submitted index, including invalid/stale selections."""
+    rows = {
+        i: {
+            "field": form.get(f"cond-{i}-field", ""),
+            "op": form.get(f"cond-{i}-op", "") or "equals",
+            "selected": form.getlist(f"cond-{i}-value"),
+        }
+        for i in condition_indexes(form)
+        if i <= 100
+    }
+    if not rows:
+        for i, (field, op, value) in enumerate(
+            zip(form.getlist("cond_field"), form.getlist("cond_op"), form.getlist("cond_value"))
+        ):
+            rows[i] = {
+                "field": field,
+                "op": op or "equals",
+                "selected": value.split(",") if op == "in" else [value],
+            }
+    return rows
 
 
 def editor_context(trigger: str) -> dict:

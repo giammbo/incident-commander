@@ -1,0 +1,10 @@
+{% if route_preview %}
+<div role="status" class="oc-route-result">
+  {% if route_preview.route %}
+  <p>First match: <a href="/oncall/routes/{{ route_preview.route.id }}"><strong>{{ route_preview.route.name }}</strong></a>
+    → <a href="/oncall/escalation-paths/{{ route_preview.route.path.id }}">{{ route_preview.route.path.name }}</a>
+    · <strong>{{ route_preview.urgency.value | capitalize }} urgency</strong>.</p>
+  {% else %}<p>No enabled route matches. This alert would stay in the inbox.</p>{% endif %}
+  <p class="muted">No notifications were sent. This test uses the saved, enabled routes in their current order.</p>
+</div>
+{% endif %}

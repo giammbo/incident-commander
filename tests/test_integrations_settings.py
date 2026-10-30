@@ -119,7 +119,7 @@ def test_blank_dedup_key_is_rejected(client, db_session):
         data={"dedup_key": "   ", "title": "t"},
         follow_redirects=False,
     )
-    assert r.status_code == 303
+    assert r.status_code == 422
     db_session.refresh(integ)
     assert integ.settings == {"dedup_key": "keep.me"}
 

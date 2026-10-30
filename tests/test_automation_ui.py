@@ -44,7 +44,7 @@ def test_action_params_partial(client, db_session):
     _login_admin(client, db_session)
     # the HTMX partial returns the param inputs for a chosen action type
     body = client.get("/automations/action-params?type=create_followup").text
-    assert "title" in body  # create_followup exposes a title input
+    assert 'name="ap_title"' in body and 'maxlength="300"' in body
 
 
 def test_action_params_partial_reads_the_select_name(client, db_session):

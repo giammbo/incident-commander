@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
+{% set role = effective_role(current_user) %}
+{% set can_manage = role and role.value in ("admin", "incident_commander") %}
 <div class="page-head">
   <h1>Alerts</h1>
-  <span class="range">
+  <nav class="range" aria-label="Alert status">
     <a href="/alerts"{% if not filter_status %} class="active"{% endif %}>Firing &amp; open</a>
     <a href="/alerts?status=firing"{% if filter_status == 'firing' %} class="active"{% endif %}>Firing</a>
     <a href="/alerts?status=resolved"{% if filter_status == 'resolved' %} class="active"{% endif %}>Resolved</a>
-  </span>
+  </nav>
 </div>
 <p class="page-sub">Inbound alerts from your monitoring, deduplicated — promote one to a new incident or attach it to an existing one.</p>
 
@@ -19,31 +21,42 @@
       <span class="status" data-status="{{ 'active' if a.status == 'firing' else 'closed' }}"><span class="dot"></span>{{ a.status }}</span>
       <strong>{{ a.title }}</strong>
       {% if a.severity_raw %}<span class="chip">{{ a.severity_raw }}</span>{% endif %}
+      {% if a.paging_error %}<span class="chip chip-danger" title="{{ a.paging_error }}">paging failed</span>{% endif %}
+      {% if paging.get(a.id) %}<a class="chip" href="/oncall/escalations/{{ paging[a.id].id }}" title="On-call escalation for this alert">paging: {{ paging[a.id].status.value }}</a>{% endif %}
       {% if a.incident_id %}<a class="chip" href="/incidents/{{ a.incident_id }}">incident #{{ a.incident_id }}</a>{% endif %}
     </div>
     <div class="inc-meta" style="margin-top:5px">
       <span>{{ a.source }}</span>
       <span>· seen {{ a.occurrence_count }}×</span>
-      <span>· {{ a.last_seen_at.strftime("%b %d · %H:%M") if a.last_seen_at else "" }}</span>
+      <span>· {{ a.last_seen_at | time_tag("%b %d · %H:%M") if a.last_seen_at else "" }}</span>
       {% for lk in a.links %}{% if lk.url and (lk.url.startswith('http://') or lk.url.startswith('https://')) %}<a class="chip" href="{{ lk.url }}" rel="noopener noreferrer">{{ lk.label }}</a>{% endif %}{% endfor %}
     </div>
-    {% if not a.incident_id %}
+    <details class="alert-context"><summary>Alert context</summary>
+      {% if a.description %}<div class="prose">{{ a.description | markdown | safe }}</div>{% endif %}
+      <dl class="kv"><dt>Source severity</dt><dd>{{ a.severity_raw or "Not provided" }}</dd><dt>First seen</dt><dd>{{ a.first_seen_at | time_tag }}</dd></dl>
+      <details><summary>Monitoring payload</summary><pre>{{ a.payload | tojson(indent=2) }}</pre></details>
+    </details>
+    {% if not a.incident_id and can_manage %}
     <div style="margin-top:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap">
       <form method="post" action="/alerts/{{ a.id }}/declare" style="display:inline">
+        <input type="hidden" name="return_filter" value="{{ filter_status or '' }}">
+        <label>Incident severity <select name="severity_level_id" required><option value="">Choose severity…</option>{% for level in severity_levels %}<option value="{{ level.id }}">{{ level.label }}</option>{% endfor %}</select></label>
+        {% include "partials/custom_field_inputs.html" %}
         <button class="btn btn-primary btn-sm" type="submit">Declare incident</button>
       </form>
       <form method="post" action="/alerts/{{ a.id }}/attach" style="display:inline-flex; gap:6px; align-items:center">
-        <select name="incident_id"><option value="">attach to…</option>{% for inc in open_incidents %}<option value="{{ inc.id }}">#{{ inc.id }} {{ inc.title }}</option>{% endfor %}</select>
+        <input type="hidden" name="return_filter" value="{{ filter_status or '' }}">
+        <select name="incident_id" aria-label="Open incident to attach" required><option value="">attach to…</option>{% for inc in open_incidents %}<option value="{{ inc.id }}">#{{ inc.id }} {{ inc.title }}</option>{% endfor %}</select>
         <button class="btn btn-sm" type="submit">Attach</button>
       </form>
       {% if a.status == 'firing' %}
-      <form method="post" action="/alerts/{{ a.id }}/resolve" style="display:inline"><button class="chip" type="submit">resolve</button></form>
+      <form method="post" action="/alerts/{{ a.id }}/resolve" style="display:inline"><input type="hidden" name="return_filter" value="{{ filter_status or '' }}"><button class="btn btn-sm" type="submit">Resolve alert</button></form>
       {% endif %}
     </div>
     {% endif %}
   </div>
   {% else %}
-  <div class="empty">No alerts. Nothing is firing.</div>
+  <div class="empty">No alerts match this view. Try another filter.</div>
   {% endfor %}
 </div>
 {% endblock %}

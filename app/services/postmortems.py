@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Incident, Postmortem, StatusCategory, StatusLevel
+from app.models import Incident, Postmortem, StatusCategory, StatusLevel, User
 
 _NOTES_START = "<!-- gemini-notes:start -->"
 _NOTES_END = "<!-- gemini-notes:end -->"
@@ -97,29 +97,34 @@ def render_template(incident, *, events, follow_ups, roles_by_type, role_types) 
     return "\n".join(lines)
 
 
-def list_incidents_with_postmortem(db: Session):
+def list_incidents_with_postmortem(db: Session, *, user: User | None = None):
     """Incidents that have a postmortem, newest incident first (archive view)."""
-    return list(
-        db.scalars(
-            select(Incident)
-            .join(Postmortem, Postmortem.incident_id == Incident.id)
-            .order_by(Incident.created_at.desc())
-        )
+    stmt = (
+        select(Incident)
+        .join(Postmortem, Postmortem.incident_id == Incident.id)
+        .order_by(Incident.created_at.desc())
     )
+    if user is not None:
+        from app.services.incident_access import visible_incident_condition
+
+        stmt = stmt.where(visible_incident_condition(user))
+    return list(db.scalars(stmt))
 
 
-def list_closed_incidents_without_postmortem(db: Session):
-    """Closed incidents that don't have a postmortem yet — the 'to write' list.
-    'Closed' mirrors Incident.is_closed (status category == closed)."""
+def list_closed_incidents_without_postmortem(db: Session, *, user: User | None = None):
+    """Visible closed incidents that still need a postmortem."""
     no_pm = ~select(Postmortem.id).where(Postmortem.incident_id == Incident.id).exists()
-    return list(
-        db.scalars(
-            select(Incident)
-            .join(StatusLevel, Incident.status_id == StatusLevel.id)
-            .where(StatusLevel.category == StatusCategory.closed, no_pm)
-            .order_by(Incident.created_at.desc())
-        )
+    stmt = (
+        select(Incident)
+        .join(StatusLevel, Incident.status_id == StatusLevel.id)
+        .where(StatusLevel.category == StatusCategory.closed, no_pm)
+        .order_by(Incident.created_at.desc())
     )
+    if user is not None:
+        from app.services.incident_access import visible_incident_condition
+
+        stmt = stmt.where(visible_incident_condition(user))
+    return list(db.scalars(stmt))
 
 
 def _build(db: Session, incident) -> str:

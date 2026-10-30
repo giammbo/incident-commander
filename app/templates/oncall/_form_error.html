@@ -1,0 +1,6 @@
+{% if request.state.oncall_error | default('') %}
+<div class="flash flash-error form-error" id="oncall-form-error" role="alert" tabindex="-1">
+  <strong>Check the form:</strong> {{ request.state.oncall_error }} Your entries are kept below.
+</div>
+<script>document.getElementById("oncall-form-error").focus();</script>
+{% endif %}

@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% macro people(selected) %}
+<div class="oc-people">
+  <span class="oc-label">People, in rotation order</span>
+  {% for i in range([selected | length, 2] | max + 1) %}
+  {% set sel = selected[i] if i < selected | length else None %}
+  <select name="user_ids" aria-label="Person {{ i + 1 }} in rotation order">
+    <option value="">—</option>
+    {% for u in users %}<option value="{{ u.id }}" {{ 'selected' if u.id | string == sel | string }}>{{ u.name }}</option>{% endfor %}
+  </select>
+  {% endfor %}
+  <button class="btn btn-sm btn-ghost" type="button" onclick="var p=this.parentNode,s=p.querySelector('select').cloneNode(true);s.value='';p.insertBefore(s,this)">+ person</button>
+</div>
+{% endmacro %}
+{% macro windows(w) %}
+<div class="oc-windows">
+  <span class="oc-label">Only on (optional, {{ s.timezone }})</span>
+  {% for d in weekdays %}
+  <label class="check"><input type="checkbox" name="win_days" value="{{ loop.index0 }}" {{ 'checked' if w and loop.index0 in w.days }}>{{ d }}</label>
+  {% endfor %}
+  <input type="time" name="win_start" aria-label="Window start" value="{{ w.start if w else '' }}"> to <input type="time" name="win_end" aria-label="Window end" value="{{ w.end if w else '' }}">
+</div>
+{% endmacro %}
+{% macro version(r, v, planned=false, can_manage=false) %}
+<section class="oc-version" data-version-state="{{ 'planned' if planned else 'current' }}">
+  <p><strong>{{ 'Planned — effective' if planned else 'Current — effective since' }} {{ v.effective_from | localdt(s.timezone) }}</strong></p>
+  <p>{{ v.shift_hours }}h shifts · {{ v.user_ids | length }} people · {% for uid in v.user_ids %}{{ names.get(uid, uid) }}{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% if v.windows %}<p class="muted">Windows: {% for w in v.windows %}{% for d in w.days %}{{ weekdays[d] }} {% endfor %}{{ w.start }}–{{ w.end }}{% endfor %}</p>{% endif %}
+  {% if can_manage %}
+  {% set editing = draft.get('kind') == 'rotation-edit' and draft.get('rotation_id') == r.id and draft.get('version_id') == (v.id if planned else None) %}
+  {% set d = draft if editing else {} %}
+  <details class="dep-edit"{% if editing %} open{% endif %}><summary>{{ 'Edit planned version' if planned else 'Change current rotation (creates a new version)' }}</summary>
+    <form method="post" action="/oncall/rotations/{{ r.id }}/edit" class="dep-picker" style="max-width:none">
+      {% if planned %}<input type="hidden" name="version_id" value="{{ v.id }}">{% endif %}
+      {{ people(d.get('user_ids', v.user_ids)) }}
+      <div class="form-row">
+        <label class="field-block"><span>Shift hours</span><input type="number" name="shift_hours" min="1" max="672" value="{{ d.get('shift_hours', v.shift_hours) }}" required></label>
+        <label class="field-block"><span>Handoff at</span><input type="time" name="handoff_local" value="{{ d.get('handoff_local', v.anchor | localdt(s.timezone, '%H:%M') | replace(' ' ~ s.timezone, '')) }}" required></label>
+        <label class="field-block"><span>Effective from</span><input type="datetime-local" name="effective_from" value="{{ d.get('effective_from', v.effective_from | localdt(s.timezone, '%Y-%m-%dT%H:%M') | replace(' ' ~ s.timezone, '') if planned else now_local) }}"></label>
+      </div>
+      {% set w = {'days': d.get('win_days', []), 'start': d.get('win_start', ''), 'end': d.get('win_end', '')} if editing else (v.windows[0] if v.windows else None) %}
+      {{ windows(w) }}
+      <p class="muted">Changing the shift length or handoff time restarts the cadence from the effective date. Current and earlier versions stay unchanged.</p>
+      <button class="btn btn-primary btn-sm" type="submit">{{ 'Save planned version' if planned else 'Save new version' }}</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+{% endmacro %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('schedules', current_user) }}
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+<div class="page-head"><h1>{{ s.name }}</h1></div>
+<p class="page-sub">Times are shown in <strong>{{ s.timezone }}</strong>.</p>
+
+<div class="card">
+  <h2>Next 14 days</h2>
+  <div class="oc-nav">
+    <a class="btn btn-sm" href="?from={{ prev_from }}">&larr; Previous</a>
+    <a class="btn btn-sm" href="?from={{ today }}">Today</a>
+    <a class="btn btn-sm" href="?from={{ next_from }}">Next &rarr;</a>
+  </div>
+  <div class="oc-scroll"><div class="oc-timeline">
+    <div class="oc-days">
+      {% for d in days %}<span style="left:{{ d.left }}%">{{ d.label }}</span>{% endfor %}
+    </div>
+    <div class="oc-track">
+      {% for d in days %}<i class="oc-tick" style="left:{{ d.left }}%"></i>{% endfor %}
+      {% for b in bars %}
+      <form method="post" action="/oncall/schedules/{{ s.id }}/take" tabindex="0" aria-label="{{ b.name }} from {{ b.shift.start | localdt(s.timezone) }} to {{ b.shift.end | localdt(s.timezone) }}" class="oc-bar oc-c{{ b.color }} {{ 'oc-override' if b.shift.source == 'override' }}"
+            style="left:{{ b.left }}%;width:{{ b.width }}%"
+            title="{{ b.name }} · {{ b.shift.start | localdt(s.timezone) }}–{{ b.shift.end | localdt(s.timezone) }}">
+        <input type="hidden" name="starts_at" value="{{ b.start_iso }}">
+        <input type="hidden" name="ends_at" value="{{ b.end_iso }}">
+        {% if b.width >= 9 %}<span>{{ b.name }}</span>{% endif %}
+        {% if b.shift.user_id != current_user.id %}<button class="oc-take" type="submit" aria-label="Take shift from {{ b.name }} starting {{ b.shift.start | localdt(s.timezone) }}" title="Take this shift">Take</button>{% endif %}
+      </form>
+      {% endfor %}
+      {% if now_pct is not none %}<i class="oc-now" style="left:{{ now_pct }}%"></i>{% endif %}
+    </div>
+  </div></div>
+  {% if legend %}<div class="oc-legend">{% for l in legend %}<span><i class="oc-sw oc-c{{ l.color }}"></i>{{ l.name }}</span>{% endfor %}</div>{% endif %}
+  {% if not bars %}<p class="muted">No one is scheduled in this range.</p>{% endif %}
+  {% if bars %}
+  <details class="oc-shift-list"><summary>View shifts as a list / take a shift</summary>
+    <div class="table-wrap"><table class="tbl"><caption>Shifts in {{ s.timezone }}</caption>
+      <thead><tr><th>Person</th><th>From</th><th>To</th><th>Action</th></tr></thead>
+      <tbody>{% for b in bars %}<tr>
+        <td>{{ b.name }}{% if b.shift.source == 'override' %} (override){% endif %}</td>
+        <td>{{ b.shift.start | localdt(s.timezone) }}</td><td>{{ b.shift.end | localdt(s.timezone) }}</td>
+        <td>{% if b.shift.user_id != current_user.id %}<form method="post" action="/oncall/schedules/{{ s.id }}/take"><input type="hidden" name="starts_at" value="{{ b.start_iso }}"><input type="hidden" name="ends_at" value="{{ b.end_iso }}"><button class="btn btn-sm" aria-label="Take {{ b.name }}'s shift starting {{ b.shift.start | localdt(s.timezone) }}">Take shift</button></form>{% else %}Your shift{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Rotations</h2>
+  <p class="muted">Higher rotations win; lower ones fill the gaps.</p>
+  {% for r in s.rotations %}
+  {% set current = versions[r.id].current %}
+  {% set planned = versions[r.id].planned %}
+  <div class="oc-rot">
+    <div class="oc-rot-head">
+      <strong>{{ loop.index }}. {{ r.name }}</strong>
+      {% if can_manage %}
+      <span class="oc-rot-actions">
+        <form method="post" action="/oncall/rotations/{{ r.id }}/move" style="display:inline"><input type="hidden" name="direction" value="up"><button class="btn btn-sm" aria-label="Move {{ r.name }} up" {{ 'disabled' if loop.first }}>&uarr;</button></form>
+        <form method="post" action="/oncall/rotations/{{ r.id }}/move" style="display:inline"><input type="hidden" name="direction" value="down"><button class="btn btn-sm" aria-label="Move {{ r.name }} down" {{ 'disabled' if loop.last }}>&darr;</button></form>
+        <form method="post" action="/oncall/rotations/{{ r.id }}/delete" style="display:inline"><button class="btn btn-sm" onclick="return confirm('Delete this rotation?')">Delete</button></form>
+      </span>
+      {% endif %}
+    </div>
+    {% if rot_warnings.get(r.id) %}<div class="oc-warn" role="alert">{{ rot_warnings[r.id] }}</div>{% endif %}
+    {% if current %}{{ version(r, current, can_manage=can_manage) }}{% else %}<p class="muted">No current version. This rotation starts at the planned effective date below.</p>{% endif %}
+    {% for v in planned %}{{ version(r, v, true, can_manage) }}{% endfor %}
+  </div>
+  {% else %}<p class="muted">No rotations yet.</p>{% endfor %}
+
+  {% if can_manage %}
+  <details class="oc-add" id="add-rotation"{% if draft.get('kind') == 'rotation-add' %} open{% endif %}><summary class="btn">Add rotation</summary>
+  {% set d = draft if draft.get('kind') == 'rotation-add' else {} %}
+  <form method="post" action="/oncall/schedules/{{ s.id }}/rotations">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120" value="{{ d.get('name', '') }}"></label>
+      <label class="field-block"><span>Shift hours</span><input type="number" name="shift_hours" min="1" max="672" value="{{ d.get('shift_hours', 24) }}" required></label>
+      <label class="field-block"><span>Handoff at</span><input type="time" name="handoff_local" value="{{ d.get('handoff_local', '09:00') }}" required></label>
+      <label class="field-block"><span>Starting</span><input type="date" name="start_date" value="{{ d.get('start_date', today) }}" required></label>
+    </div>
+    {{ people(d.get('user_ids', [])) }}
+    {{ windows({'days': d.get('win_days', []), 'start': d.get('win_start', ''), 'end': d.get('win_end', '')}) }}
+    <button class="btn btn-primary" type="submit">Add rotation</button>
+  </form>
+  </details>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Overrides</h2>
+  {% if overrides %}
+  <table class="tbl">
+    <thead><tr><th>Who</th><th>From</th><th>To</th><th></th></tr></thead>
+    <tbody>
+      {% for o in overrides %}
+      <tr>
+        <td>{{ names.get(o.user_id, o.user_id) }}</td>
+        <td>{{ o.starts_at | localdt(s.timezone) }}</td>
+        <td>{{ o.ends_at | localdt(s.timezone) }}</td>
+        <td>{% if can_manage %}<form method="post" action="/oncall/overrides/{{ o.id }}/delete"><button class="btn btn-sm">Delete</button></form>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No upcoming overrides. Use the shift list above to take a shift yourself.</p>{% endif %}
+
+  {% if can_manage %}
+  <details class="oc-add" id="add-override"{% if draft.get('kind') == 'override' %} open{% endif %}><summary class="btn">Add override</summary>
+  {% set d = draft if draft.get('kind') == 'override' else {} %}
+  <form method="post" action="/oncall/schedules/{{ s.id }}/overrides">
+    <div class="form-row">
+      <label class="field-block"><span>Person</span>
+        <select name="user_id" required>{% for u in users %}<option value="{{ u.id }}"{% if d.get('user_id') == u.id %} selected{% endif %}>{{ u.name }}</option>{% endfor %}</select>
+      </label>
+      <label class="field-block"><span>From ({{ s.timezone }})</span><input type="datetime-local" name="starts_at" value="{{ d.get('starts_at', '') }}" required></label>
+      <label class="field-block"><span>To ({{ s.timezone }})</span><input type="datetime-local" name="ends_at" value="{{ d.get('ends_at', '') }}" required></label>
+    </div>
+    <button class="btn btn-primary" type="submit">Add override</button>
+  </form>
+  </details>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,21 +1,27 @@
-{# Conditions + action picker for one trigger; swapped in when the trigger select changes. #}
-<div class="field-block"><span>Only if (all must match — leave a row empty to skip it)</span>
+{# One form owns these IDs; edit has a dedicated page. #}
+<div class="field-block"><span>Only if (all conditions must match; empty rows are skipped)</span>
   {% for i in cond_indexes %}
+  {% set condition = condition_rows.get(i, {}) if condition_rows is defined and condition_rows is mapping else condition_rows[i] if condition_rows is defined and i < condition_rows|length else {} %}
   <div class="cond-row form-row">
     <select name="cond-{{ i }}-field" aria-label="Condition {{ i + 1 }}"
             hx-get="/automations/condition-value" hx-vals='{"i": {{ i }}}' hx-include="this"
             hx-target="#cond-{{ i }}-value" hx-swap="innerHTML" hx-trigger="change">
       <option value="">— no condition —</option>
-      {% for f, label in fields %}<option value="{{ f }}">{{ label }}</option>{% endfor %}
+      {% if condition.get('field') and condition.field not in fields|map(attribute=0)|list %}<option value="{{ condition.field }}" selected>Invalid field — choose a replacement</option>{% endif %}
+      {% for f, label in fields %}<option value="{{ f }}" {{ 'selected' if condition.get('field') == f else '' }}>{{ label }}</option>{% endfor %}
     </select>
-    <span id="cond-{{ i }}-value" class="cond-value"></span>
+    <span id="cond-{{ i }}-value" class="cond-value">
+      {% if condition.get("field") %}
+        {% with field=condition.field, op=condition.op, options=field_options(condition.field), selected=condition.selected if condition.selected is defined else (condition.value|map('string')|list if condition.value is sequence and condition.value is not string else [('true' if condition.value else 'false') if condition.field == 'is_private' else condition.value|string]) %}{% include "partials/automation_condition_value.html" %}{% endwith %}
+      {% endif %}
+    </span>
   </div>
   {% endfor %}
 </div>
-<div class="field-block"><span>Then</span>
-  <select name="action_type" aria-label="Action" hx-get="/automations/action-params" hx-target="#action-params" hx-swap="innerHTML" hx-trigger="change" hx-include="this">
+<div class="field-block"><span>Then (required)</span>
+  <select name="action_type" aria-label="Action" required hx-get="/automations/action-params" hx-target="#action-params" hx-swap="innerHTML" hx-trigger="change" hx-include="this">
     <option value="">— pick an action —</option>
-    {% for a, label in actions %}<option value="{{ a }}">{{ label }}</option>{% endfor %}
+    {% for a, label in actions %}<option value="{{ a }}" {{ 'selected' if action_type == a else '' }}>{{ label }}</option>{% endfor %}
   </select>
-  <div id="action-params" class="form-row" style="margin-top:8px"></div>
+  <div id="action-params" class="form-row" style="margin-top:8px">{% include "partials/automation_action_params.html" %}</div>
 </div>

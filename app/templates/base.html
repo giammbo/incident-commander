@@ -6,11 +6,13 @@
   <meta name="color-scheme" content="dark">
   <title>{% block title %}Incident Commander{% endblock %}</title>
   <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/core-ui.js" defer></script>
   <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/app.css?v=12">
+  <link rel="stylesheet" href="/static/app.css?v=20">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   {# Flash messages are set via request.session["flash"] and popped here, so every full
      page renders them once. HTMX partials don't extend base.html, so they never consume a flash. #}
   {% set notice = request.session.pop("flash", None) %}
@@ -21,39 +23,77 @@
     <aside class="sidebar">
       <a class="brand" href="/"><span class="pulse" aria-hidden="true"></span>Incident&nbsp;Commander</a>
       {% set _p = request.url.path %}
-      <nav class="nav">
-        <a href="/" class="{{ 'active' if _p == '/' or _p.startswith('/incidents') else '' }}">Incidents</a>
-        <a href="/systems" class="{{ 'active' if _p.startswith('/systems') else '' }}">Systems</a>
-        <a href="/components" class="{{ 'active' if _p.startswith('/components') else '' }}">Components</a>
-        <a href="/maps" class="{{ 'active' if _p.startswith('/maps') else '' }}">Maps</a>
-        <a href="/follow-ups" class="{{ 'active' if _p.startswith('/follow-ups') else '' }}">Follow-ups</a>
-        <a href="/postmortems" class="{{ 'active' if _p.startswith('/postmortems') else '' }}">Postmortems</a>
-        <a href="/alerts" class="{{ 'active' if _p.startswith('/alerts') else '' }}">Alerts</a>
-        <a href="/insights" class="{{ 'active' if _p.startswith('/insights') else '' }}">Insights</a>
+      <button class="btn menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation">Menu</button>
+      <div id="primary-navigation" class="navigation-groups">
+      {% for group, links in [
+        ("Response", [("/", "Incidents"), ("/alerts", "Alerts"), ("/oncall", "On-call")]),
+        ("Learn", [("/follow-ups", "Follow-ups"), ("/postmortems", "Postmortems"), ("/insights", "Insights")]),
+        ("Catalog", [("/systems", "Systems"), ("/components", "Components"), ("/maps", "Maps")])
+      ] %}
+      <nav class="nav" aria-label="{{ group }}"><span class="nav-heading">{{ group }}</span>
+        {% for href, label in links %}
+        {% set active = (_p == '/' or _p.startswith('/incidents')) if href == '/' else _p.startswith(href) %}
+        <a href="{{ href }}"{% if active %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
       </nav>
+      {% endfor %}
       {% if _is_admin %}
-      <nav class="nav nav-admin">
-        <a href="/users" class="{{ 'active' if _p.startswith('/users') else '' }}">Users</a>
-        <a href="/groups" class="{{ 'active' if _p.startswith('/groups') else '' }}">Groups</a>
-        <a href="/automations" class="{{ 'active' if _p.startswith('/automations') else '' }}">Automations</a>
+      <nav class="nav nav-admin" aria-label="Admin"><span class="nav-heading">Admin</span>
+        {% for href, label in [("/users", "Users"), ("/groups", "Groups"), ("/automations", "Automations"), ("/settings", "Settings")] %}
+        <a href="{{ href }}"{% if _p.startswith(href) %} class="active" aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
       </nav>
       {% endif %}
+      </div>
       <div class="sidebar-foot">
         <div class="who">{{ current_user.email }}</div>
-        <a href="{{ '/settings' if _is_admin else '/account/password' }}">{{ 'Settings' if _is_admin else 'Account' }}</a>
+        <a href="/account/password">Account</a>
+        <a href="/account/notifications">Notifications</a>
         <a href="/logout">Sign out</a>
       </div>
     </aside>
-    <main class="main">
+    <main class="main" id="main-content">
+      {% include "partials/core_feedback.html" %}
       {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>
   {% else %}
-  <main class="main main-plain">
+  <main class="main main-plain" id="main-content">
+    {% include "partials/core_feedback.html" %}
     {% if notice %}<div class="notice">{{ notice }}</div>{% endif %}
     {% block content_plain %}{{ self.content() }}{% endblock %}
   </main>
   {% endif %}
+  <script>
+  /* Rewrites every <time datetime> to the browser's local time with a short zone label,
+     and keeps [data-since] ages ("open for 5m") fresh. Server text is the UTC fallback. */
+  (function () {
+    function local() {
+      document.querySelectorAll("time[datetime]").forEach(function (el) {
+        var d = new Date(el.getAttribute("datetime"));
+        if (isNaN(d)) return;
+        var o = {weekday: "short", day: "2-digit", month: "short", hour: "2-digit",
+                 minute: "2-digit", hour12: false, timeZoneName: "short"};
+        if (el.hasAttribute("data-seconds")) o.second = "2-digit";
+        try { el.textContent = new Intl.DateTimeFormat(undefined, o).format(d); } catch (e) {}
+        el.title = d.toISOString();
+      });
+    }
+    function ages() {
+      document.querySelectorAll("[data-since]").forEach(function (el) {
+        var s = Math.max(0, (Date.now() - new Date(el.getAttribute("data-since"))) / 1000), t;
+        if (isNaN(s)) return;
+        if (s < 60) t = "<1m";
+        else if (s < 3600) t = Math.floor(s / 60) + "m";
+        else if (s < 86400) { var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); t = h + "h" + (m ? " " + m + "m" : ""); }
+        else t = Math.floor(s / 86400) + "d";
+        el.textContent = "open for " + t;
+      });
+    }
+    local(); ages(); setInterval(ages, 30000);
+    document.addEventListener("htmx:afterSwap", function () { local(); ages(); });
+  })();
+  </script>
 </body>
 </html>

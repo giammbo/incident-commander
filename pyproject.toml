@@ -37,6 +37,7 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "pyjwt[crypto]>=2.13.0",
     "python-multipart>=0.0.32",
+    "pywebpush>=2.5.0",
     "slack-sdk>=3.42.0",
     "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.49.0",

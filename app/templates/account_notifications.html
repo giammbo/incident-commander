@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>My notifications</h1>
+  <a class="btn btn-sm" href="/account/password">Change password</a></div>
+<p class="page-sub">How and when you are reached when you are paged. Only you can change these.</p>
+
+<div class="card">
+  <h2>Channels</h2>
+  <table>
+    <thead><tr><th>Channel</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for c in channels %}
+      <tr>
+        <td data-label="Channel">{{ c.label }}</td>
+        <td data-label="Status">{% if c.reachable %}Ready{% else %}<span class="muted">{{ c.reason }}</span>{% endif %}</td>
+        <td data-label="Test">
+          <form method="post" action="/account/notifications/test/{{ c.key }}" style="display:inline">
+            <button class="btn btn-sm" type="submit" aria-label="Send me a test using {{ c.label }}" {% if not c.reachable %}disabled title="{{ c.reason }}"{% endif %}>Send me a test</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Phone (SMS and calls)</h2>
+  {% if phone %}
+  <p>{{ phone }} &middot; {% if phone_verified %}<strong>verified</strong>{% else %}<span class="muted">not verified</span>{% endif %}</p>
+  {% endif %}
+  {% if phone_pending %}<p>Awaiting verification: <strong>{{ phone_pending }}</strong>. Your verified number stays active until the new code is accepted.</p>{% endif %}
+  <form method="post" action="/account/notifications/phone" class="form-row">
+    <label class="field-block grow"><span>Number (international format)</span>
+      <input name="phone" type="tel" autocomplete="tel" value="{{ phone_pending or '' }}" placeholder="+393331234567" pattern="\+[1-9][0-9]{6,14}" required></label>
+    <button class="btn btn-primary" type="submit" {% if not phone_provider_ready %}disabled{% endif %}>{{ 'Send code for new number' if phone_verified else 'Send code' }}</button>
+  </form>
+  {% if not phone_provider_ready %}<p class="muted">SMS verification is unavailable. Ask an administrator to configure Twilio. Your existing number is unchanged.</p>{% endif %}
+  {% if phone_code_pending %}
+  <form method="post" action="/account/notifications/phone/verify" class="form-row" style="margin-top:10px">
+    <label class="field-block"><span>6-digit code</span>
+      <input name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label>
+    <button class="btn" type="submit">Verify</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Browser push</h2>
+  <p class="muted" id="push-status" role="status" aria-live="polite">{{ push_count }} device{{ '' if push_count == 1 else 's' }} subscribed.</p>
+  <button class="btn" type="button" id="push-enable" {% if not vapid_public_key %}disabled{% endif %}>Enable on this browser</button>
+  {% if not vapid_public_key %}<span class="muted"> Web Push keys are not configured by an admin yet.</span>{% endif %}
+</div>
+
+{% for urg in ['high', 'low'] %}
+<div class="card">
+  <h2>{{ urg | capitalize }}-urgency rules</h2>
+  <p class="muted">{% if custom[urg] %}Custom rules.{% else %}Using the defaults; edit and save to customise.{% endif %}
+    Leave all channels empty to go back to defaults.</p>
+  <form method="post" action="/account/notifications/rules">
+    <input type="hidden" name="urgency" value="{{ urg }}">
+    {% set rows = rules[urg] %}
+    {% for i in range(5) %}
+    {% set row = rows[i] if i < rows | length else none %}
+    <div class="form-row" style="margin-bottom:8px">
+      <select name="channel[]" aria-label="{{ urg | capitalize }} urgency channel {{ i + 1 }}">
+        <option value="">(none)</option>
+        {% for c in channels %}<option value="{{ c.key }}" {{ 'selected' if row and row[0] == c.key else '' }}>{{ c.label }}</option>{% endfor %}
+      </select>
+      <label>after <input type="number" name="delay[]" min="0" max="60" value="{{ row[1] if row else 0 }}" style="width:70px"> min</label>
+    </div>
+    {% endfor %}
+    <button class="btn btn-primary" type="submit">Save {{ urg }} rules</button>
+  </form>
+</div>
+{% endfor %}
+
+<script>
+(function () {
+  var btn = document.getElementById("push-enable");
+  var status = document.getElementById("push-status");
+  if (!btn || btn.disabled) return;
+  var key = {{ vapid_public_key | tojson }};
+  function b64(s) {
+    var p = "=".repeat((4 - s.length % 4) % 4), r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(r, function (c) { return c.charCodeAt(0); });
+  }
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    status.textContent = "This browser does not support push notifications.";
+    btn.disabled = true; return;
+  }
+  function activeWorker(reg) {
+    if (reg.active) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var worker = reg.installing || reg.waiting;
+      if (!worker) { reject(new Error("Service worker is unavailable. Try again.")); return; }
+      var timer = setTimeout(function () { finish(new Error("Service worker activation timed out. Try again.")); }, 15000);
+      function finish(error) {
+        clearTimeout(timer);
+        worker.removeEventListener("statechange", changed);
+        if (error) reject(error); else resolve();
+      }
+      function changed() {
+        if (worker.state === "activated") finish();
+        else if (worker.state === "redundant") finish(new Error("Service worker activation failed. Try again."));
+      }
+      worker.addEventListener("statechange", changed);
+      changed();
+    });
+  }
+  btn.addEventListener("click", async function () {
+    btn.disabled = true;
+    status.textContent = "Requesting notification permission…";
+    try {
+      if (await Notification.requestPermission() !== "granted") { status.textContent = "Permission denied. Allow notifications in your browser settings, then try again."; return; }
+      status.textContent = "Activating browser notifications…";
+      var reg = await navigator.serviceWorker.register("/oncall-sw.js", { scope: "/" });
+      await activeWorker(reg);
+      var sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(key) });
+      status.textContent = "Saving this browser’s subscription…";
+      var r = await fetch("/account/notifications/push", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sub.toJSON())
+      });
+      if (r.redirected || r.status === 401) { status.textContent = "Your session expired. Sign in, then enable notifications again."; return; }
+      var result = r.ok ? await r.json() : null;
+      status.textContent = result && result.ok ? "This browser is subscribed." : "Could not save the subscription. Try again.";
+    } catch (e) { status.textContent = "Push setup failed: " + e.message; }
+    finally { btn.disabled = false; }
+  });
+})();
+</script>
+{% endblock %}

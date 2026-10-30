@@ -1,80 +1,191 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Service map</h1>
-  <span class="map-legend">
-    <span class="dot" style="background:#FF5D5D"></span>down
-    <span class="dot" style="background:#F4B740"></span>impacted
-    <span class="dot" style="background:#56B6E6"></span>ok
-    <span class="muted" style="margin-left:10px">large = system · small = component</span>
-  </span>
+<div class="page-head"><h1>Service map</h1></div>
+<p class="page-sub">Systems, components and the impact of open incidents you can access. The list below exposes the same states and directed relationships as the 3D view.</p>
+<p>Down = directly affected by an open incident. Impacted = depends on an affected node. OK = no visible open incident impact. System and component states are scoped separately: an incident affecting selected components does not automatically change the parent system state. A system-wide incident without selected components affects the system and all its components. These states are inferred from incident records, not live health checks.</p>
+<div class="map-controls form-row">
+  <label class="field-block grow"><span>Find a system or component</span><input type="search" id="map-search" placeholder="Search by name"></label>
+  <button type="button" class="btn" id="map-fit" disabled>Fit map</button>
+  <button type="button" class="btn" id="map-reset" disabled>Reset view</button>
+  <button type="button" class="btn" id="map-refresh">Refresh / retry</button>
 </div>
-<p class="page-sub">Interactive 3D map of systems and components, with live blast-radius lighting up what open incidents affect.</p>
-<div id="graph-wrap">
-  <div id="graph"></div>
-  <div id="graph-labels"></div>
+<p id="map-status" class="map-status" role="status" aria-live="polite">Snapshot available. Checking for updates…</p>
+<p id="map-freshness" class="muted">Snapshot: <time datetime="{{ graph.updated_at }}" data-local="{{ graph.updated_at }}">{{ graph.updated_at }}</time>. Automatically refreshed every 15 seconds while this page is visible.</p>
+<p id="map-visual-status" class="muted" role="status"></p>
+<details open><summary>3D view · drag to rotate, scroll to zoom</summary>
+<div id="graph-wrap" aria-label="3D service map; equivalent interactive list below">
+  <div id="graph" aria-hidden="true"></div><div id="graph-labels" aria-hidden="true"></div>
 </div>
+</details>
+<section aria-labelledby="map-list-title">
+  <h2 id="map-list-title" tabindex="-1">Systems, components and relationships</h2>
+  <p id="map-results" role="status">{{ graph.nodes | length }} nodes</p>
+  <div id="map-list" class="map-list">
+    {% for n in graph.nodes %}
+    <article class="card map-node" id="map-node-{{ n.id }}" data-node-label="{{ n.label | lower }}">
+      <h3><a data-map-key="{{ n.id }}:catalog" href="{{ n.url }}">{{ n.label }}</a></h3>
+      <p>{{ n.type | title }}{% if n.system %} in {{ n.system }}{% endif %} · State: <strong>{{ n.status }}</strong></p>
+      <button class="btn btn-sm" type="button" data-map-focus="{{ n.id }}" data-map-key="{{ n.id }}:focus" disabled>Focus {{ n.label }} in map</button>
+      <ul>{% for r in n.relations %}<li>{{ r.relation }} <a data-map-key="{{ n.id }}:relation:{{ r.relation }}:{{ r.id }}" href="{{ r.url }}">{{ r.label }}</a></li>{% else %}<li>No relationships.</li>{% endfor %}</ul>
+      <p>Linked open incidents:</p><ul>{% for i in n.incidents %}<li><a data-map-key="{{ n.id }}:incident:{{ i.id }}" href="{{ i.url }}">{{ i.title }}</a></li>{% else %}<li>No visible open incidents directly linked.</li>{% endfor %}</ul>
+    </article>
+    {% else %}<p>No systems or components yet. <a data-map-key="empty:catalog" href="/systems">Open the systems catalog</a> to add your first system.</p>{% endfor %}
+  </div>
+</section>
+<noscript><p>The catalog list and links work without JavaScript. Reload this page to update the snapshot.</p></noscript>
 <script src="/static/3d-force-graph.min.js"></script>
 <script>
 (function () {
-  var graphEl = document.getElementById("graph");
-  var labelsEl = document.getElementById("graph-labels");
-  if (typeof ForceGraph3D === "undefined") { graphEl.textContent = "3D library failed to load."; return; }
-  var COLORS = { down: "#FF5D5D", impacted: "#F4B740", ok: "#56B6E6" };
-  var nodes = [];
-  var labelEls = {};
+  var graphEl = document.getElementById('graph');
+  var labelsEl = document.getElementById('graph-labels');
+  var listEl = document.getElementById('map-list');
+  var statusEl = document.getElementById('map-status');
+  var freshnessEl = document.getElementById('map-freshness');
+  var visualStatus = document.getElementById('map-visual-status');
+  var searchEl = document.getElementById('map-search');
+  var fitButton = document.getElementById('map-fit');
+  var resetButton = document.getElementById('map-reset');
+  var refreshButton = document.getElementById('map-refresh');
+  var COLORS = {down: '#FF5D5D', impacted: '#F4B740', ok: '#56B6E6'};
+  var data = {{ graph | tojson }};
+  var nodes = [], labelEls = {}, Graph = null, loading = false, initialFit = true;
+  var requestedNode = new URLSearchParams(location.search).get('node');
+  var lastSignature = JSON.stringify(data.nodes);
 
-  var Graph = ForceGraph3D()(graphEl)
-    .backgroundColor("#0B1116")
-    .nodeLabel("label")
-    .nodeColor(function (n) { return COLORS[n.status] || "#56B6E6"; })
-    .nodeVal(function (n) { return n.type === "system" ? 8 : 2; })
-    .linkColor(function (l) { return l.kind === "contains" ? "#22303C" : "#5E7180"; })
-    .linkWidth(function (l) { return l.kind === "dep" ? 1 : 0.5; })
-    .linkOpacity(0.5)
-    .linkDirectionalParticles(function (l) { return l.kind === "dep" ? 2 : 0; })
-    .linkDirectionalParticleSpeed(0.006);
-
-  // Always-on node names rendered as DOM labels, projected from 3D each frame
-  // (works with the vendored UMD build — no extra libraries).
-  function rebuildLabels() {
-    labelsEl.innerHTML = "";
-    labelEls = {};
-    nodes.forEach(function (n) {
-      var d = document.createElement("div");
-      d.className = "node-label";
-      d.textContent = n.label;
-      labelsEl.appendChild(d);
-      labelEls[n.id] = d;
-    });
+  try {
+    if (typeof ForceGraph3D === 'undefined') throw new Error('3D library unavailable');
+    Graph = ForceGraph3D()(graphEl).backgroundColor('#0B1116')
+      .nodeLabel('label').nodeColor(function(n) { return COLORS[n.status]; })
+      .nodeVal(function(n) { return n.type === 'system' ? 8 : 2; })
+      .linkColor(function(l) { return l.kind === 'contains' ? '#22303C' : '#5E7180'; })
+      .linkWidth(function(l) { return l.kind === 'dep' ? 1 : 0.5; }).linkOpacity(0.5)
+      .onNodeClick(function(n) { window.location.assign(n.url); });
+    fitButton.disabled = resetButton.disabled = false;
+  } catch (err) {
+    visualStatus.textContent = '3D view unavailable. Use the complete list below to explore states, relationships and incidents.';
+    document.getElementById('graph-wrap').hidden = true;
   }
-  function positionLabels() {
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      var d = labelEls[n.id];
-      if (!d || n.x == null) continue;
-      var c = Graph.graph2ScreenCoords(n.x, n.y, n.z);
-      var dy = n.type === "system" ? 14 : 9;
-      d.style.transform = "translate(-50%,-100%) translate(" + c.x + "px," + (c.y - dy) + "px)";
-      d.style.color = COLORS[n.status] || "#E7EEF4";
-      d.style.fontWeight = n.type === "system" ? "600" : "400";
-      d.style.fontSize = n.type === "system" ? "13px" : "11px";
+
+  function addLink(parent, url, label, key) {
+    var link = document.createElement('a'); link.href = url; link.textContent = label; link.dataset.mapKey = key; parent.appendChild(link);
+  }
+  function rebuildList() {
+    var focused = document.activeElement;
+    var ownedFocus = focused && listEl.contains(focused);
+    var focusKey = ownedFocus && focused.dataset.mapKey;
+    var focusedNode = ownedFocus && focused.closest('.map-node');
+    var previousIds = Array.from(listEl.querySelectorAll('.map-node')).filter(function(el) { return !el.hidden; }).map(function(el) { return el.id; });
+    var query = searchEl.value.trim().toLowerCase();
+    listEl.replaceChildren();
+    data.nodes.forEach(function(n) {
+      var article = document.createElement('article'); article.className = 'card map-node';
+      article.id = 'map-node-' + n.id; article.dataset.nodeLabel = n.label.toLowerCase();
+      article.hidden = !article.dataset.nodeLabel.includes(query);
+      var title = document.createElement('h3'); addLink(title, n.url, n.label, n.id + ':catalog'); article.appendChild(title);
+      var state = document.createElement('p'); state.textContent = n.type + (n.system ? ' in ' + n.system : '') + ' · State: ' + n.status; article.appendChild(state);
+      var button = document.createElement('button'); button.className = 'btn btn-sm'; button.type = 'button'; button.dataset.mapFocus = n.id; button.dataset.mapKey = n.id + ':focus';
+      button.textContent = 'Focus ' + n.label + ' in map'; button.disabled = !Graph; article.appendChild(button);
+      var rels = document.createElement('ul');
+      (n.relations || []).forEach(function(r) { var li = document.createElement('li'); li.appendChild(document.createTextNode(r.relation + ' ')); addLink(li, r.url, r.label, n.id + ':relation:' + r.relation + ':' + r.id); rels.appendChild(li); });
+      if (!rels.children.length) { var empty = document.createElement('li'); empty.textContent = 'No relationships.'; rels.appendChild(empty); }
+      article.appendChild(rels);
+      var caption = document.createElement('p'); caption.textContent = 'Linked open incidents:'; article.appendChild(caption);
+      var incidents = document.createElement('ul');
+      (n.incidents || []).forEach(function(i) { var li = document.createElement('li'); addLink(li, i.url, i.title, n.id + ':incident:' + i.id); incidents.appendChild(li); });
+      if (!incidents.children.length) { var none = document.createElement('li'); none.textContent = 'No visible open incidents directly linked.'; incidents.appendChild(none); }
+      article.appendChild(incidents); listEl.appendChild(article);
+    });
+    if (!data.nodes.length) {
+      var empty = document.createElement('p'); empty.textContent = 'No systems or components yet. '; addLink(empty, '/systems', 'Open the systems catalog', 'empty:catalog'); listEl.appendChild(empty);
+    }
+    if (ownedFocus) {
+      var restored = Array.from(listEl.querySelectorAll('[data-map-key]')).find(function(el) {
+        var node = el.closest('.map-node');
+        return el.dataset.mapKey === focusKey && !el.disabled && (!node || !node.hidden);
+      });
+      // Removed links return to their node's catalog; removed nodes use the next
+      // surviving visible node, then the previous one, then the list heading.
+      var currentId = focusedNode && focusedNode.id;
+      var index = previousIds.indexOf(currentId);
+      var fallbackIds = [currentId].concat(previousIds.slice(index + 1), previousIds.slice(0, index).reverse());
+      fallbackIds.some(function(id) {
+        var node = id && document.getElementById(id);
+        if (!restored && node && !node.hidden) restored = node.querySelector('h3 a');
+        return !!restored;
+      });
+      if (!restored) restored = listEl.querySelector('.map-node:not([hidden]) h3 a');
+      (restored || document.getElementById('map-list-title')).focus();
     }
   }
-  (function frame() { positionLabels(); requestAnimationFrame(frame); })();
-
-  function fit() { Graph.width(graphEl.clientWidth).height(graphEl.clientHeight); }
-  fit();
-  window.addEventListener("resize", fit);
-
-  function load() {
-    fetch("/maps/graph.json").then(function (r) { return r.json(); }).then(function (d) {
-      nodes = d.nodes;
-      Graph.graphData(d);
-      rebuildLabels();
-    });
+  function resize() {
+    if (Graph && graphEl.clientWidth && graphEl.clientHeight) Graph.width(graphEl.clientWidth).height(graphEl.clientHeight);
   }
-  load();
-  setInterval(load, 15000);
+  function focusNode(id) {
+    var node = nodes.find(function(n) { return n.id === id; });
+    if (!Graph || !node || !Number.isFinite(node.x)) return;
+    var x = node.x || 1, y = node.y || 1, z = node.z || 1;
+    var ratio = 1 + 100 / Math.hypot(x, y, z);
+    Graph.cameraPosition({x: x * ratio, y: y * ratio, z: z * ratio}, node, 500);
+  }
+  function filter() {
+    var query = searchEl.value.trim().toLowerCase();
+    var selected = data.nodes.filter(function(n) { return n.label.toLowerCase().includes(query); });
+    var ids = new Set(selected.map(function(n) { return n.id; }));
+    Array.from(listEl.querySelectorAll('[data-node-label]')).forEach(function(el) { el.hidden = !el.dataset.nodeLabel.includes(query); });
+    document.getElementById('map-results').textContent = selected.length ? selected.length + ' matching nodes' : (data.nodes.length ? 'No nodes match your search. Clear the search to show all nodes.' : 'No systems or components yet.');
+    if (Graph) {
+      // ForceGraph mutates nodes/links: keep the catalog snapshot intact.
+      nodes = selected.map(function(n) { return Object.assign({}, n); });
+      var links = data.links.filter(function(l) { return ids.has(l.source) && ids.has(l.target); }).map(function(l) { return Object.assign({}, l); });
+      Graph.graphData({nodes: nodes, links: links});
+      labelsEl.replaceChildren(); labelEls = {};
+      nodes.forEach(function(n) { var label = document.createElement('div'); label.className = 'node-label'; label.textContent = n.label; labelsEl.appendChild(label); labelEls[n.id] = label; });
+      resize();
+    }
+  }
+  function updateFreshness() {
+    var time = new Date(data.updated_at);
+    freshnessEl.textContent = 'Last successful snapshot: ' + time.toLocaleString() + '. Refreshes every 15 seconds while this page is visible.';
+  }
+  function load() {
+    if (loading) return;
+    loading = true; refreshButton.disabled = true;
+    statusEl.textContent = 'Loading latest map…';
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 10000);
+    fetch('/maps/graph.json', {cache: 'no-store', signal: controller.signal}).then(function(response) {
+      if (!response.ok || response.redirected) throw new Error('Unable to load map');
+      return response.json();
+    }).then(function(next) {
+      if (!Array.isArray(next.nodes) || !Array.isArray(next.links) || !next.updated_at) throw new Error('Invalid map data');
+      var signature = JSON.stringify(next.nodes);
+      data = next;
+      if (signature !== lastSignature) { rebuildList(); lastSignature = signature; }
+      filter(); updateFreshness();
+      statusEl.textContent = data.nodes.length ? 'Map is up to date.' : 'Map is empty. Add systems and components in the catalog.';
+      if (Graph && initialFit && nodes.length) { initialFit = false; setTimeout(function() { Graph.zoomToFit(500, 40); if (requestedNode) focusNode(requestedNode); }, 1200); }
+    }).catch(function() {
+      statusEl.textContent = 'Map refresh failed. Showing the last available snapshot; it may be stale. Use Refresh / retry to try again.';
+    }).finally(function() { clearTimeout(timeout); loading = false; refreshButton.disabled = false; });
+  }
+  listEl.addEventListener('click', function(event) { var button = event.target.closest('[data-map-focus]'); if (button) focusNode(button.dataset.mapFocus); });
+  searchEl.addEventListener('input', filter);
+  fitButton.addEventListener('click', function() { if (Graph) Graph.zoomToFit(500, 40); });
+  resetButton.addEventListener('click', function() { searchEl.value = ''; filter(); if (Graph) { Graph.cameraPosition({x: 0, y: 0, z: 500}, {x: 0, y: 0, z: 0}, 500); setTimeout(function() { Graph.zoomToFit(500, 40); }, 550); } });
+  refreshButton.addEventListener('click', load);
+  window.addEventListener('resize', resize);
+  document.querySelectorAll('[data-map-focus]').forEach(function(button) { button.disabled = !Graph; });
+  if (Graph) (function frame() {
+    nodes.forEach(function(n) {
+      var label = labelEls[n.id]; if (!label || n.x == null) return;
+      var coords = Graph.graph2ScreenCoords(n.x, n.y, n.z);
+      label.style.transform = 'translate(-50%,-100%) translate(' + coords.x + 'px,' + (coords.y - (n.type === 'system' ? 14 : 9)) + 'px)';
+      label.style.color = COLORS[n.status];
+    });
+    requestAnimationFrame(frame);
+  })();
+  filter(); updateFreshness(); load();
+  setInterval(function() { if (!document.hidden) load(); }, 15000);
 })();
 </script>
 {% endblock %}

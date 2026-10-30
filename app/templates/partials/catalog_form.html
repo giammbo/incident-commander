@@ -1,0 +1,13 @@
+{% if error %}<div class="flash error" role="alert" id="catalog-error" tabindex="-1">{{ error }}</div><script>document.getElementById('catalog-error').focus();</script>{% endif %}
+<form method="post" action="{{ form_action }}">
+  <div class="form-row">
+    <label class="field-block grow"><span>Name</span><input name="name" value="{{ form_values.name or '' }}" required maxlength="120"{% if error %} aria-describedby="catalog-error"{% endif %}></label>
+    <label class="field-block grow"><span>Description</span><input name="description" value="{{ form_values.description or '' }}" maxlength="500"></label>
+  </div>
+  {% if catalog_kind == 'components' %}
+  <label class="field-block"><span>System</span><select name="system_id" required><option value="">Choose a system</option>{% for s in all_systems %}<option value="{{ s.id }}"{% if form_values.system_id | string == s.id | string %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+  {% if editing %}<p class="muted">Moving to another system removes dependency links that would cross systems.</p>{% endif %}
+  {% endif %}
+  <label class="field-block"><span>Owner team</span><select name="owner_team_id"><option value="">No owner team</option>{% for t in teams %}<option value="{{ t.id }}"{% if form_values.owner_team_id | string == t.id | string %} selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></label>
+  <button class="btn btn-primary" type="submit">{{ submit_label }}</button>
+</form>

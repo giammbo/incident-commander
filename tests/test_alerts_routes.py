@@ -70,13 +70,24 @@ def test_login_page_renders_without_sidebar_when_unauthenticated(client, db_sess
 def test_readonly_cannot_declare(client, db_session):
     a = _alert(db_session)
     _login(client, db_session, "ro@x.io", Role.read_only)
-    assert client.post(f"/alerts/{a.id}/declare", follow_redirects=False).status_code == 403
+    assert (
+        client.post(
+            f"/alerts/{a.id}/declare",
+            data={"severity_level_id": db_session.scalar(select(SeverityLevel)).id},
+            follow_redirects=False,
+        ).status_code
+        == 403
+    )
 
 
 def test_declare_creates_and_links_incident(client, db_session):
     a = _alert(db_session)
     _login(client, db_session, "ic@x.io", Role.incident_commander)
-    r = client.post(f"/alerts/{a.id}/declare", follow_redirects=False)
+    r = client.post(
+        f"/alerts/{a.id}/declare",
+        data={"severity_level_id": db_session.scalar(select(SeverityLevel)).id},
+        follow_redirects=False,
+    )
     assert r.status_code == 303
     db_session.refresh(a)
     inc = db_session.scalar(select(Incident).where(Incident.id == a.incident_id))
@@ -92,7 +103,11 @@ def test_declare_runs_incident_opened_rules(client, db_session):
     )
     db_session.commit()
     _login(client, db_session, "ic@x.io", Role.incident_commander)
-    client.post(f"/alerts/{a.id}/declare", follow_redirects=False)
+    client.post(
+        f"/alerts/{a.id}/declare",
+        data={"severity_level_id": db_session.scalar(select(SeverityLevel)).id},
+        follow_redirects=False,
+    )
     db_session.refresh(a)
     bodies = list(
         db_session.scalars(
@@ -110,7 +125,11 @@ def test_declare_fires_opened_webhook(client, db_session, webhook_posts):
     db_session.add(Webhook(name="W", url="https://hooks/x", format="slack", enabled=True))
     db_session.commit()
     _login(client, db_session, "ic@x.io", Role.incident_commander)
-    r = client.post(f"/alerts/{a.id}/declare", follow_redirects=False)
+    r = client.post(
+        f"/alerts/{a.id}/declare",
+        data={"severity_level_id": db_session.scalar(select(SeverityLevel)).id},
+        follow_redirects=False,
+    )
     assert r.status_code == 303
     assert any("incident opened: Boom" in (j.get("text") or "") for _, j in webhook_posts)
 
@@ -118,7 +137,11 @@ def test_declare_fires_opened_webhook(client, db_session, webhook_posts):
 def test_attach_to_existing(client, db_session):
     a = _alert(db_session)
     _login(client, db_session, "ic@x.io", Role.incident_commander)
-    client.post(f"/alerts/{a.id}/declare", follow_redirects=False)  # creates incident 1
+    client.post(
+        f"/alerts/{a.id}/declare",
+        data={"severity_level_id": db_session.scalar(select(SeverityLevel)).id},
+        follow_redirects=False,
+    )  # creates incident 1
     db_session.refresh(a)
     inc_id = a.incident_id
     a.incident_id = None

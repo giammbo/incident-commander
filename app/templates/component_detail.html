@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "partials/dep_picker.html" import dep_picker %}
+{% block content %}
+<div class="page-head"><h1>{{ c.name }}</h1><a class="btn" href="/maps?node=comp-{{ c.id }}#map-node-comp-{{ c.id }}">View on map</a></div>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+<p>System: <a href="/systems/{{ c.system_id }}">{{ c.system.name }}</a> · Owner: {{ c.owner_team.name if c.owner_team else 'No owner team' }}</p>
+{% if c.description %}<p>{{ c.description }}</p>{% endif %}
+<div class="card"><h2>Dependencies</h2>
+<p>Depends on: {% for d in c.depends_on %}<a href="/components/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% else %}None{% endfor %}</p>
+<p>Used by: {% for d in used_by %}<a href="/components/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% else %}None{% endfor %}</p>
+{% if can_manage and peers %}{{ dep_picker('/components/' ~ c.id ~ '/deps', c, peers, blocked) }}{% endif %}
+</div>
+{% set item_kind = 'component' %}{% include "partials/catalog_incidents.html" %}
+{% if can_manage %}<div class="card"><h2>Edit component</h2>
+{% set catalog_kind = 'components' %}{% set editing = true %}{% set all_systems = systems %}{% set form_values = draft if draft is not none else c %}{% set form_action = '/components/' ~ c.id ~ '/edit' %}{% set submit_label = 'Save component' %}
+{% include "partials/catalog_form.html" %}
+</div>{% endif %}
+<a class="backlink" href="/components?system_id={{ c.system_id }}">← Components in {{ c.system.name }}</a>
+{% endblock %}

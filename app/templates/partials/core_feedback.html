@@ -1,0 +1,2 @@
+<div id="global-error" role="alert" tabindex="-1"{% if core_error %} class="form-error"{% endif %}>{{ core_error | default("") }}</div>
+{% if core_draft is defined %}<script type="application/json" class="core-draft">{{ {"action": core_action, "values": core_draft} | tojson }}</script>{% endif %}

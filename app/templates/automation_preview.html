@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Local dry-run: {{ rule.name }}</h1></div>
+<div class="card">
+  <p role="status">No actions were executed, no provider was contacted, and the last actual execution was left unchanged.</p>
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  <h2>{{ 'Sample matches' if matched else 'Sample does not match' }}</h2>
+  <p>{{ summary }}</p>
+  <ul>{% for check in checks %}<li>{{ 'Matches' if check.matched else 'Does not match' }}: {{ check.description }}</li>{% else %}<li>No conditions: every subject for this trigger matches.</li>{% endfor %}</ul>
+  <p>{{ 'The action intent above would run on a matching event.' if matched else 'The actions would be skipped for this sample.' }} {{ 'This rule is currently disabled.' if not rule.enabled else '' }}</p>
+</div>
+<a class="btn" href="/automations#rule-{{ rule.id }}">Back to rule</a>
+{% endblock %}

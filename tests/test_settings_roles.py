@@ -19,7 +19,10 @@ def _admin(client, db_session):
     _, pw = bootstrap_admin(db_session, "admin@localhost")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
 
 def test_admin_creates_role(client, db_session):
@@ -80,7 +83,7 @@ def test_delete_in_use_flashes(client, db_session):
     db_session.commit()
 
     r = client.post(f"/settings/roles/{role_type_id}/delete", follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 422
 
     still_there = db_session.get(IncidentRoleType, role_type_id)
     assert still_there is not None

@@ -69,7 +69,7 @@ code="$(req -X POST --data-urlencode "email=admin@localhost" --data-urlencode "p
 [ "$code" = "303" ] || fail "login expected 303, got $code"
 
 echo "== clear forced password change (bootstrap admin has must_change_password) =="
-code="$(req -X POST --data-urlencode "new_password=Smoke-123456" --data-urlencode "confirm=Smoke-123456" "$BASE/account/password")"
+code="$(req -X POST --data-urlencode "name=Smoke Admin" --data-urlencode "new_password=Smoke-123456" --data-urlencode "confirm=Smoke-123456" "$BASE/account/password")"
 [ "$code" = "303" ] || fail "password change expected 303, got $code"
 
 echo "== declare an incident (title only; severity is optional) =="
@@ -77,8 +77,49 @@ code="$(req -X POST --data-urlencode "title=Smoke test incident" "$BASE/incident
 [ "$code" = "303" ] || fail "declare incident expected 303, got $code"
 
 echo "== assert it shows on the incidents list =="
-if curl -fsS -c "$JAR" -b "$JAR" "$BASE/" | grep -q "Smoke test incident"; then
-  echo "SMOKE-OK"
-else
-  fail "incident not visible on incidents list"
-fi
+curl -fsS -c "$JAR" -b "$JAR" "$BASE/" | grep -q "Smoke test incident" \
+  || fail "incident not visible on incidents list"
+
+# POST and print the Location header of the redirect (empty if none).
+post_loc() {
+  curl -s -o /dev/null -D - -c "$JAR" -b "$JAR" -H "Origin: $BASE" -H "Referer: $BASE/" \
+    -X POST "$@" | tr -d '\r' | awk 'tolower($1)=="location:" {print $2}'
+}
+
+echo "== on-call: schedule + rotation + escalation path =="
+SCHED="$(post_loc --data-urlencode "name=Smoke primary" --data-urlencode "timezone=UTC" "$BASE/oncall/schedules")"
+[ -n "$SCHED" ] || fail "schedule create gave no redirect"
+code="$(req -X POST --data-urlencode "name=Daily" --data-urlencode "user_ids=1" \
+  --data-urlencode "shift_hours=24" --data-urlencode "handoff_local=09:00" \
+  --data-urlencode "start_date=$(date -u -v-1d +%Y-%m-%d 2>/dev/null || date -u -d yesterday +%Y-%m-%d)" "$BASE$SCHED/rotations")"
+[ "$code" = "303" ] || fail "rotation create expected 303, got $code"
+PATH_URL="$(post_loc --data-urlencode "name=Smoke path" "$BASE/oncall/escalation-paths")"
+[ -n "$PATH_URL" ] || fail "path create gave no redirect"
+code="$(req -X POST --data-urlencode "schedule_ids=${SCHED##*/}" --data-urlencode "ack_timeout_minutes=5" \
+  "$BASE$PATH_URL/levels")"
+[ "$code" = "303" ] || fail "level create expected 303, got $code"
+
+echo "== on-call: manual page to the path =="
+ESC="$(post_loc --data-urlencode "target_kind=path" --data-urlencode "path_id=${PATH_URL##*/}" \
+  --data-urlencode "urgency=high" --data-urlencode "message=smoke page" "$BASE/oncall/page")"
+case "$ESC" in /oncall/escalations/*) ;; *) fail "manual page gave no escalation redirect ($ESC)" ;; esac
+
+echo "== on-call: wait for the worker tick to process the page =="
+# SMTP is not configured in the smoke stack, so email is unreachable: the engine records a
+# "level_empty ... no configured channel" event (a configured SMTP would show an email row
+# with status sent/skipped instead). Either proves the worker picked the page up and ran.
+ok=""
+for i in $(seq 1 30); do
+  page="$(curl -fsS -c "$JAR" -b "$JAR" "$BASE$ESC" || true)"
+  flat="$(printf '%s' "$page" | tr -d '\n')"
+  if printf '%s' "$flat" | grep -qE 'level_empty|<td>email</td>[[:space:]]*<td><span class="chip[^"]*">(sent|skipped)</span>'; then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+[ -n "$ok" ] || fail "escalation $ESC was never processed by the worker (no email row, no level_empty event)"
+printf '%s' "$flat" | grep -q 'no configured channel' || printf '%s' "$flat" | grep -q '<td>email</td>' \
+  || fail "escalation $ESC processed but without the expected email outcome"
+
+echo "SMOKE-OK"

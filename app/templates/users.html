@@ -4,50 +4,64 @@
   <h1>Users</h1>
   <span class="stats">{{ users | length }} total</span>
 </div>
-<p class="page-sub">Manage user accounts — invite people, assign roles, and reset access.</p>
+<p class="page-sub">Invite people, assign access, and recover accounts.</p>
 
 <div class="card">
   <h2>Invite a user</h2>
+  {% if error %}<div class="alert" role="alert" tabindex="-1">{{ error }}</div>{% endif %}
   <form class="form-row" method="post" action="/users">
-    <input class="grow" name="email" type="email" placeholder="email" required autocomplete="off">
-    <input name="name" placeholder="name" required autocomplete="off">
-    <select name="role" aria-label="Role">{% for r in roles %}<option value="{{ r.value }}">{{ r.value }}</option>{% endfor %}</select>
-    <button class="btn btn-primary" type="submit">Create user</button>
+    <label class="field-block grow"><span>Email address</span><input class="grow" name="email" type="email" maxlength="320" value="{{ form.email }}" required autocomplete="off"></label>
+    <label class="field-block"><span>Full name</span><input name="name" maxlength="200" value="{{ form.name }}" required autocomplete="off"></label>
+    <label class="field-block"><span>Access level</span><select name="role">{% for r in roles %}<option value="{{ r.value }}" {% if form.role == r.value %}selected{% endif %}>{{ role_labels[r] }}</option>{% endfor %}</select></label>
+    <button class="btn btn-primary" type="submit">{{ 'Send invitation' if smtp_ready else 'Create user' }}</button>
   </form>
-  <p class="muted" style="margin:10px 0 0; font-size:12.5px">A temporary password is generated and shown once after creation; the user changes it on first login.</p>
+  <p class="muted">{% if smtp_ready %}An invitation to set a password is emailed and expires after 72 hours. The account stays pending until accepted. If delivery fails, use Resend invitation below.{% else %}Email is not configured. A temporary password is shown once after creation; share it with the person securely. They must change it on first login.{% endif %}</p>
 </div>
 
 <div class="card">
   <h2>Members</h2>
   <table>
-    <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Active</th><th>Groups</th><th></th></tr></thead>
+    <thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Account and access</th><th>Groups</th><th>Actions</th></tr></thead>
     <tbody>
     {% for u in users %}
       {% set er = effective_role(u) %}
       {% set member_ids = u.groups | map(attribute="id") | list %}
+      {% set invite = invites.get(u.email) %}
+      {% set pending = invite and not invite.accepted_at and invite.expires_at > now %}
       <tr>
-        <td>{{ u.email }}{% if u.is_protected_admin %} <span class="muted">· protected</span>{% endif %}</td>
-        <td>{{ u.name }}</td>
-        <td>{% if er %}<span class="role" data-role="{{ er.value }}">{{ er.value }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td>{% if u.is_active %}<span class="badge-yes">active</span>{% else %}<span class="badge-no">disabled</span>{% endif %}</td>
-        <td>
+        <td data-label="Email">{{ u.email }}{% if u.is_protected_admin %} <span class="muted">· protected</span>{% endif %}</td>
+        <td data-label="Name">{{ u.name }}</td>
+        <td data-label="Role">{% if er %}<span class="role" data-role="{{ er.value }}">{{ role_labels[er].split(' — ')[0] }}</span>{% else %}<span class="muted">No access group</span>{% endif %}</td>
+        <td data-label="Account and access">
+          {% if u.is_active %}<span class="badge-yes">Active</span>{% elif not u.password_hash and not u.oidc_subject %}<span class="badge-no">Pending setup</span>{% else %}<span class="badge-no">Disabled</span>{% endif %}
+          <div class="muted">{% if u.oidc_subject %}Single sign-on{% elif u.must_change_password %}Temporary password · change required{% elif u.password_hash %}Password sign-in{% else %}No password set{% endif %}</div>
+          {% if pending %}<p class="muted">{{ 'Password setup link pending' if u.is_active else 'Invitation pending' }} · expires <time datetime="{{ invite.expires_at.isoformat() }}" data-local-time>{{ invite.expires_at.strftime('%d %b %Y %H:%M UTC') }}</time>. If it was not received, resend it.</p>
+          {% elif invite and not invite.accepted_at %}<p class="muted">Invitation expired or revoked. Send a new link.</p>{% endif %}
+        </td>
+        <td data-label="Groups">
           <form class="form-row" method="post" action="/users/{{ u.id }}/groups">
-            <select name="group_ids" multiple size="{{ groups | length }}">
-              {% for g in groups %}
-                <option value="{{ g.id }}" {% if g.id in member_ids %}selected{% endif %}>{{ g.name }}</option>
-              {% endfor %}
-            </select>
-            <button class="btn btn-sm" type="submit">Save</button>
+            <label class="field-block"><span>Groups for {{ u.name }}</span><select name="group_ids" multiple size="{{ [groups | length, 4] | min }}">
+              {% for g in groups %}<option value="{{ g.id }}" {% if g.id in member_ids %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+            </select></label>
+            <button class="btn btn-sm" type="submit" aria-label="Save groups for {{ u.name }}">Save groups</button>
           </form>
         </td>
-        <td>{% if not u.is_protected_admin and u.is_active %}
-          <form method="post" action="/users/{{ u.id }}/deactivate"><button class="btn btn-sm">Deactivate</button></form>
-        {% endif %}</td>
+        <td data-label="Actions">{% if not u.is_protected_admin %}
+          <div class="action-row">
+            {% if smtp_ready %}
+              <form method="post" action="/users/{{ u.id }}/{{ 'reset-password' if u.is_active else 'resend-invite' }}"><button class="btn btn-sm" type="submit">{{ 'Email password reset' if u.is_active else 'Resend invitation' }}</button></form>
+            {% else %}
+              <form method="post" action="/users/{{ u.id }}/reset-password" onsubmit="return confirm('Replace the current password for this account with a temporary password and require a password change?')"><button class="btn btn-sm" type="submit">Set temporary password</button></form>
+            {% endif %}
+            {% if pending %}<form method="post" action="/users/{{ u.id }}/revoke-invite"><button class="btn btn-sm" type="submit">Revoke link</button></form>{% endif %}
+            {% if not u.is_active and (u.password_hash or u.oidc_subject) %}<form method="post" action="/users/{{ u.id }}/reactivate"><button class="btn btn-sm" type="submit">Reactivate</button></form>{% endif %}
+            {% if u.is_active %}<form method="post" action="/users/{{ u.id }}/deactivate" onsubmit="return confirm('Disable sign-in and revoke outstanding invitations for this account?')"><button class="btn btn-sm" type="submit">Deactivate</button></form>{% endif %}
+          </div>
+        {% else %}<span class="muted">Protected administrator. Use Account to change your password.</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
-
 <p><a class="backlink" href="/groups">→ Manage groups</a></p>
 {% endblock %}

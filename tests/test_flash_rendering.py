@@ -38,26 +38,34 @@ def _incident(db_session):
     return inc
 
 
-def test_incident_route_flash_renders_on_detail(client, db_session):
-    # An empty note flashes "Note cannot be empty" and 303-redirects to the detail page;
-    # following the redirect, base.html must render the flash (previously it was invisible).
+def test_empty_note_renders_request_local_error_on_detail(client, db_session):
     _login(client, db_session, "ic@x.io", Role.incident_commander)
     inc = _incident(db_session)
     db_session.commit()
-    r = client.post(
-        f"/incidents/{inc.id}/notes", data={"body": "   "}
-    )  # follows the 303 by default
-    assert r.status_code == 200
-    assert "Note cannot be empty" in r.text
+    response = client.post(
+        f"/incidents/{inc.id}/notes", data={"body": "   "}, follow_redirects=False
+    )
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Note cannot be empty" in response.text
+    assert "Note cannot be empty" not in client.get(f"/incidents/{inc.id}").text
 
 
 def test_flash_is_consumed_after_one_render(client, db_session):
-    # The flash shows once, then a fresh page load no longer shows it.
+    # An actual flash must first be visible, then consumed by the first full render.
     _login(client, db_session, "ic@x.io", Role.incident_commander)
     inc = _incident(db_session)
     db_session.commit()
-    client.post(
-        f"/incidents/{inc.id}/notes", data={"body": "   "}
-    )  # consumes the flash on the redirect render
-    r2 = client.get(f"/incidents/{inc.id}")
-    assert "Note cannot be empty" not in r2.text
+    response = client.post(
+        f"/incidents/{inc.id}/add-meet",
+        data={"video": "unknown"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/incidents/{inc.id}"
+    first_render = client.get(response.headers["location"])
+    assert first_render.status_code == 200
+    assert "Unknown video provider." in first_render.text
+    second_render = client.get(f"/incidents/{inc.id}")
+    assert second_render.status_code == 200
+    assert "Unknown video provider." not in second_render.text

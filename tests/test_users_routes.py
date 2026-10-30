@@ -30,7 +30,10 @@ def test_admin_creates_user(client, db_session):
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
     # admin starts with must_change_password — allow the page anyway for the test by changing it
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
     r = client.post(
         "/users",
         data={"email": "new@x.io", "name": "New", "role": "read_only"},
@@ -50,7 +53,10 @@ def test_admin_changes_user_groups(client, db_session):
     db_session.add(ic_group)
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
     r = client.post(
         f"/users/{target.id}/groups", data={"group_ids": [ic_group.id]}, follow_redirects=False
@@ -67,7 +73,10 @@ def test_cannot_strip_protected_admin_via_route(client, db_session):
     db_session.commit()
     admin_id = admin.id
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
     # Try to set the protected admin to NO groups → guarded, graceful redirect (no 500).
     r = client.post(f"/users/{admin_id}/groups", data={"group_ids": []}, follow_redirects=False)
@@ -93,7 +102,10 @@ def test_protected_admin_deactivate_route_is_graceful(client, db_session):
     db_session.commit()
     admin_id = admin.id
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
     r = client.post(f"/users/{admin_id}/deactivate", follow_redirects=False)
     assert r.status_code == 303  # guarded, not a 500
@@ -122,7 +134,10 @@ def test_create_user_emails_invite_when_smtp_configured(client, db_session, monk
     db_session.flush()
 
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
     r = client.post(
         "/users",
         data={"email": "dev@x.io", "name": "Dev", "role": "read_only"},
@@ -157,7 +172,10 @@ def test_create_user_keeps_user_when_invite_email_fails(client, db_session, monk
     db_session.flush()
 
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
     r = client.post(
         "/users",
         data={"email": "dev@x.io", "name": "Dev", "role": "read_only"},
@@ -175,7 +193,10 @@ def test_create_duplicate_email_is_graceful(client, db_session):
     create_user(db_session, email="dup@x.io", name="Dup", role=Role.read_only, password="pw-123456")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
     r = client.post(
         "/users",
         data={"email": "dup@x.io", "name": "Again", "role": "read_only"},

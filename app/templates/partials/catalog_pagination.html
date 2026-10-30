@@ -1,0 +1,7 @@
+{% if pagination.pages > 1 %}
+<nav class="catalog-pagination" aria-label="{{ catalog_kind | title }} pages">
+  {% if pagination.page > 1 %}<a class="btn" href="{{ pagination.previous }}">Previous page</a>{% endif %}
+  <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+  {% if pagination.page < pagination.pages %}<a class="btn" href="{{ pagination.next }}">Next page</a>{% endif %}
+</nav>
+{% endif %}

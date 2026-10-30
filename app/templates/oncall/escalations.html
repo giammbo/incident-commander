@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% from "oncall/_page_badges.html" import status_badge, urgency_badge, age, ack_button, paging_line %}
+{% macro rows(items, with_ack=false) %}
+<table class="tbl"><thead><tr><th>Escalation</th><th>Status</th><th>Urgency</th><th>Source</th><th>Paging</th><th>Age</th>{% if with_ack %}<th></th>{% endif %}</tr></thead><tbody>
+  {% for e in items %}
+  <tr><td><a href="/oncall/escalations/{{ e.id }}">{{ e.title }}</a> <span class="muted">#{{ e.short_code }}</span></td>
+    <td>{{ status_badge(e) }}</td><td>{{ urgency_badge(e) }}</td>
+    <td>{{ 'Alert route' if e.source == 'alert_route' else 'Manual page' }}</td>
+    <td>{% if with_ack %}{{ paging_line(e, paged[e.id].paged) }}{% else %}—{% endif %}</td>
+    <td>{{ age(e) }} <span class="muted">{{ e.created_at | time_tag }}</span></td>
+    {% if with_ack %}<td>{{ ack_button(e, paged[e.id], '/oncall/escalations') }}</td>{% endif %}</tr>
+  {% endfor %}
+</tbody></table>
+{% endmacro %}
+{% block content %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('escalations', current_user) }}
+<div class="page-head"><h1>Escalations</h1></div>
+<p class="page-sub">Open escalations first, then those resolved in the last 7 days.</p>
+<div class="card"><h2>Open</h2>
+  {% if open %}{{ rows(open, true) }}{% else %}<p class="muted">No open escalations.</p>{% endif %}</div>
+<div class="card"><h2>Resolved in the last 7 days</h2>
+  {% if closed %}{{ rows(closed) }}{% else %}<p class="muted">Nothing resolved recently.</p>{% endif %}</div>
+{% endblock %}

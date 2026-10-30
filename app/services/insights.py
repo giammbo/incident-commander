@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Incident
+from app.models import Incident, User
 
 
 def window_since(days: int) -> datetime | None:
@@ -48,15 +48,23 @@ def _breakdown(incidents, keyfn, colorfn=None) -> list[dict]:
     ]
 
 
-def compute_insights(db: Session, *, since: datetime | None) -> dict:
+def compute_insights(db: Session, *, since: datetime | None, user: User | None = None) -> dict:
     stmt = select(Incident)
-    if since is not None:
-        stmt = stmt.where(Incident.created_at >= since)
-    incidents = list(db.scalars(stmt))
+    if user is not None:
+        from app.services.incident_access import visible_incident_condition
+
+        stmt = stmt.where(visible_incident_condition(user))
+    # Backlog is always current, independent of the selected creation cohort.
+    visible_incidents = list(db.scalars(stmt))
+    incidents = [i for i in visible_incidents if since is None or i.created_at >= since]
 
     total = len(incidents)
     closed = [i for i in incidents if i.is_closed]
-    durs = [i.closed_at - i.created_at for i in incidents if i.closed_at and i.created_at]
+    durs = [
+        i.closed_at - i.created_at
+        for i in closed
+        if i.closed_at and i.created_at and i.closed_at >= i.created_at
+    ]
     mttr = _humanize_duration(sum(durs, timedelta()) / len(durs)) if durs else None
     open_followups = sum(1 for i in incidents for f in i.follow_ups if f.status == "open")
 
@@ -65,6 +73,11 @@ def compute_insights(db: Session, *, since: datetime | None) -> dict:
         "open": total - len(closed),
         "closed": len(closed),
         "mttr": mttr,
+        "mttr_count": len(durs),
+        "current_open": sum(not i.is_closed for i in visible_incidents),
+        "current_open_followups": sum(
+            f.status == "open" for i in visible_incidents for f in i.follow_ups
+        ),
         "open_followups": open_followups,
         "by_severity": _breakdown(
             incidents,

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('', current_user) }}
+<div class="page-head"><h1>Page someone</h1></div>
+<p class="page-sub">Notify an escalation path or specific people using their notification rules.
+  {% if incident %}Linked to incident <a href="/incidents/{{ incident.id }}">{{ incident.title }}</a>.{% endif %}</p>
+
+{% if incident and incident.is_private %}<p class="notice">Private incident: only admins, the creator and people assigned an incident role can be paged. Assign an incident role before paging someone else. Paging does not grant access.</p>{% endif %}
+<form method="post" action="/oncall/page" class="card" id="page-form">
+  {% if incident %}<input type="hidden" name="incident_id" value="{{ incident.id }}">{% endif %}
+  <div class="field"><label>Page</label>
+    <label><input type="radio" name="target_kind" value="path"{% if draft.get('target_kind', 'path') == 'path' %} checked{% endif %}> An escalation path</label>
+    <label><input type="radio" name="target_kind" value="users"{% if draft.get('target_kind') == 'users' %} checked{% endif %}> Specific people</label></div>
+  <div class="field" id="pf-path"><label for="path_id">Escalation path</label>
+    <select name="path_id" id="path_id"><option value="">— choose —</option>
+      {% for p in paths %}<option value="{{ p.id }}"{% if draft.get('path_id', '') | string == p.id | string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+  <div class="field" id="pf-users"><label>People</label>
+    <div class="dep-picker" style="margin-top:4px">
+      {% for u in users %}
+      <label class="dep-opt"><input type="checkbox" name="user_ids" value="{{ u.id }}"{% if u.id | string in draft.get('user_ids', []) | map('string') | list %} checked{% endif %}><span>{{ u.name }}</span></label>
+      {% endfor %}
+    </div></div>
+  <p class="pg-preview" id="pf-preview" aria-live="polite"
+     hx-get="/oncall/page/preview" hx-trigger="load, change from:#page-form" hx-include="[name=target_kind],[name=path_id],[name=user_ids],[name=incident_id]"
+     hx-swap="innerHTML"></p>
+  <div class="field"><label for="urgency">Urgency</label>
+    <select name="urgency" id="urgency"><option value="high"{% if draft.get('urgency', 'high') == 'high' %} selected{% endif %}>High</option><option value="low"{% if draft.get('urgency') == 'low' %} selected{% endif %}>Low</option></select></div>
+  <div class="field"><label for="message">Message (optional)</label>
+    <textarea name="message" id="message" maxlength="1000" rows="3" style="width:100%">{{ draft.get('message', '') }}</textarea></div>
+  <button class="btn btn-primary" type="submit">Page</button>
+</form>
+<script>
+(function () {
+  var f = document.getElementById("page-form");
+  function sync() {
+    var k = f.querySelector('input[name="target_kind"]:checked').value;
+    document.getElementById("pf-path").style.display = k === "path" ? "" : "none";
+    document.getElementById("pf-users").style.display = k === "users" ? "" : "none";
+  }
+  f.addEventListener("change", sync); sync();
+})();
+</script>
+{% endblock %}

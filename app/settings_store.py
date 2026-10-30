@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import AppSettings, GoogleSettings, SlackSettings, SmtpSettings, SsoSettings
+from app.models import (
+    AppSettings,
+    GoogleSettings,
+    OnCallSettings,
+    SlackSettings,
+    SmtpSettings,
+    SsoSettings,
+)
 
 
 def get_or_create(db: Session, model):
@@ -32,3 +39,7 @@ def sso_settings(db: Session) -> SsoSettings:
 
 def smtp_settings(db: Session) -> SmtpSettings:
     return get_or_create(db, SmtpSettings)
+
+
+def oncall_settings(db: Session) -> OnCallSettings:
+    return get_or_create(db, OnCallSettings)

@@ -8,11 +8,17 @@
     {% endfor %}
   </span>
 </div>
-<p class="page-sub">Analytics across your incidents — MTTR, volumes, and breakdowns by severity, type, status, system and team.</p>
+<p class="page-sub">Incidents you can access. {% if days %}The selected window includes incidents created in the last {{ days }} days, measured in UTC.{% else %}All creation dates are included.{% endif %}</p>
 
+<div class="card">
+  <h2>Current backlog · all creation dates</h2>
+  <p><strong>{{ data.current_open }}</strong> open incidents · <strong>{{ data.current_open_followups }}</strong> open follow-ups across all visible incidents, including closed incidents.</p>
+  <a href="/follow-ups">Manage follow-ups</a>
+</div>
+<h2>Created in the selected window</h2>
 <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:22px">
-  {% for label, value, primary in [("Open", data.open, true), ("Incidents", data.total, false), ("Closed", data.closed, false),
-                          ("MTTR", data.mttr or "—", false), ("Open follow-ups", data.open_followups, false)] %}
+  {% for label, value, primary in [("Still open", data.open, true), ("Created", data.total, false), ("Now closed", data.closed, false),
+                          ("MTTR", data.mttr or "—", false), ("Cohort open follow-ups", data.open_followups, false)] %}
   <div class="card kpi{% if primary %} kpi-primary{% endif %}">
     <div class="kpi-label">{{ label }}</div>
     <div class="kpi-value">{{ value }}</div>
@@ -20,6 +26,12 @@
   {% endfor %}
 </div>
 
+<div class="card">
+  <h2>How to read these metrics</h2>
+  <p>MTTR is the mean time from incident creation to its recorded closure, across currently closed incidents created in this window with valid closure timestamps. It measures time to closure, not time to service restoration. Sample: {{ data.mttr_count }} incidents. A dash means there are no eligible closures.</p>
+  <p>Breakdowns use the same creation cohort ({{ data.total }} incidents). Team attribution uses the current owner of the incident's system, not the responders or the owner at the time of the incident. Unassigned records appear as “—”.</p>
+  <p>Still open and now closed describe the current state of this cohort. Current backlog above includes older incidents and is independent of the selected window.</p>
+</div>
 {% if data.total == 0 %}
 <div class="empty">No incidents in this window.</div>
 {% else %}
@@ -28,9 +40,9 @@
   <h2>{{ title }}</h2>
   {% set maxc = (rows | map(attribute='count') | max) or 1 %}
   {% for r in rows %}
-  <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px">
-    <span style="flex:0 0 160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ r.label }}</span>
-    <span class="bar" style="flex:1 1 auto"><span class="bar-fill" style="width:{{ (r.count / maxc * 100) | round }}%{% if r.color %}; background:{{ r.color }}{% endif %}"></span></span>
+  <div class="insight-row" style="display:flex; align-items:center; gap:10px; margin-bottom:6px">
+    <span class="insight-label" style="flex:0 1 160px; overflow-wrap:anywhere">{{ r.label }}</span>
+    <span class="bar" aria-hidden="true" style="flex:1 1 auto"><span class="bar-fill" style="width:{{ (r.count / maxc * 100) | round }}%{% if r.color %}; background:{{ r.color }}{% endif %}"></span></span>
     <span style="flex:0 0 68px; text-align:right"><b>{{ r.count }}</b> <span class="muted" style="font-size:11px">{{ (r.count / data.total * 100) | round }}%</span></span>
   </div>
   {% endfor %}

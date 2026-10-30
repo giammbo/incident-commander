@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Acknowledge page · Incident Commander{% endblock %}
+{% block content %}
+<div class="auth">
+  <form class="auth-card" method="post" action="/oncall/ack/{{ token }}">
+    <div class="mark">Incident Commander</div>
+    <h1>{% if done %}Acknowledged{% else %}Acknowledge page{% endif %}</h1>
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if esc %}
+      <p><strong>{{ esc.title }}</strong></p>
+      <p class="muted">Urgency: {{ esc.urgency.value }} · Status: {{ esc.status.value }} · Code {{ esc.short_code }}</p>
+      {% if result %}<p>{{ result }}</p>{% endif %}
+      {% if can_ack %}
+        <button class="btn btn-primary" type="submit">Acknowledge</button>
+      {% endif %}
+      <a class="btn" href="/oncall/escalations/{{ esc.id }}">Open escalation</a>
+    {% else %}
+      <a class="btn" href="/login">Sign in</a>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

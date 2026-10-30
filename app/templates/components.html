@@ -2,79 +2,38 @@
 {% from "partials/dep_picker.html" import dep_picker %}
 {% block content %}
 <div class="page-head"><h1>Components</h1></div>
-<p class="page-sub">The components inside each system and how they depend on one another — the fine-grained catalogue layer.</p>
+<p class="page-sub">Components inside each system and their dependencies.</p>
 {% set _role = effective_role(current_user) %}
 {% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
-
+{% set catalog_kind = 'components' %}
 <div class="card">
+  {% include "partials/catalog_controls.html" %}
   {% if components %}
-  <table>
-    <thead><tr><th>Name</th><th>System</th><th>Owner</th><th>Dependencies</th><th></th></tr></thead>
-    <tbody>
-      {% for c in components %}
-      <tr>
-        <td>{{ c.name }}</td>
-        <td class="muted">{{ c.system.name }}</td>
-        <td class="muted">{{ c.owner_team.name if c.owner_team else '—' }}</td>
-        <td class="dep-cell">
-          {% if c.depends_on %}<div>→ {{ c.depends_on | map(attribute='name') | sort | join(', ') }}</div>{% else %}<span class="muted">—</span>{% endif %}
-          {% set _ub = deps.used_by[c.id] %}
-          {% if _ub %}<div class="dep-usedby">used by {{ _ub | map(attribute='name') | join(', ') }}</div>{% endif %}
-          {% if can_manage %}
-          {% set same_system = components | selectattr('system_id', 'equalto', c.system_id) | rejectattr('id', 'equalto', c.id) | list %}
-          {% if same_system %}{{ dep_picker("/components/" ~ c.id ~ "/deps", c, same_system, deps.blocked[c.id]) }}
-          {% else %}<div class="dep-usedby">No other components in {{ c.system.name }} to depend on.</div>{% endif %}
-          {% endif %}
-        </td>
-        <td>
-          {% if can_manage %}
-          <details>
-            <summary class="btn btn-sm">Edit</summary>
-            <form method="post" action="/components/{{ c.id }}/edit" style="margin-top:8px">
-              <label class="field-block"><span>Name</span><input name="name" value="{{ c.name }}" required></label>
-              <label class="field-block"><span>Description</span><input name="description" value="{{ c.description or '' }}"></label>
-              <label class="field-block"><span>System</span>
-                <select name="system_id" required>{% for s in systems %}<option value="{{ s.id }}"{% if s.id == c.system_id %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select>
-              </label>
-              <label class="field-block"><span>Owner team</span>
-                <select name="owner_team_id">
-                  <option value="">—</option>
-                  {% for t in teams %}<option value="{{ t.id }}"{% if c and c.owner_team_id == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
-                </select>
-              </label>
-              <p class="muted" style="font-size:12px;margin:0 0 8px">Moving to another system drops any dependency edges that would cross systems.</p>
-              <button class="btn btn-sm btn-primary" type="submit">Save</button>
-            </form>
-          </details>
-          <form method="post" action="/components/{{ c.id }}/delete" style="display:inline">
-            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ c.name|tojson }} + "?")'>Delete</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}<p class="muted">No components yet.</p>{% endif %}
-
-  {% if can_manage and systems %}
-  <h3 style="margin:16px 0 10px">Add component</h3>
-  <form method="post" action="/components">
-    <div class="form-row">
-      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120"></label>
-      <label class="field-block"><span>System</span>
-        <select name="system_id" required>{% for s in systems %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
-      </label>
-      <label class="field-block grow"><span>Description</span><input name="description" maxlength="500"></label>
-    </div>
-    <label class="field-block"><span>Owner team</span>
-      <select name="owner_team_id">
-        <option value="">—</option>
-        {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
-      </select>
-    </label>
-    <button class="btn btn-primary" type="submit">Add component</button>
-  </form>
-  {% elif can_manage %}<p class="muted" style="margin-top:14px">Create a system first.</p>{% endif %}
+  <div class="table-scroll"><table class="catalog-table">
+    <thead><tr><th>Name</th><th>System</th><th>Owner</th><th>Dependencies</th>{% if can_manage %}<th>Actions</th>{% endif %}</tr></thead>
+    <tbody>{% for c in components %}<tr>
+      <td><a href="/components/{{ c.id }}">{{ c.name }}</a></td>
+      <td><a href="/systems/{{ c.system_id }}">{{ c.system.name }}</a></td>
+      <td>{{ c.owner_team.name if c.owner_team else 'No owner' }}</td>
+      <td class="dep-cell">
+        {% for d in c.depends_on %}<a href="/components/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% else %}<span class="muted">None</span>{% endfor %}
+        {% set _ub = deps.used_by[c.id] %}{% if _ub %}<div class="dep-usedby">used by {{ _ub | map(attribute='name') | join(', ') }}</div>{% endif %}
+        {% if can_manage %}
+          {% set same_system = all_components | selectattr('system_id', 'equalto', c.system_id) | rejectattr('id', 'equalto', c.id) | list %}
+          {% if same_system %}{{ dep_picker("/components/" ~ c.id ~ "/deps", c, same_system, deps.blocked[c.id]) }}{% endif %}
+        {% endif %}
+      </td>
+      {% if can_manage %}<td><a class="btn btn-sm" href="/components/{{ c.id }}">Edit <span class="sr-only">{{ c.name }}</span></a>
+      <form method="post" action="/components/{{ c.id }}/delete"><button class="btn btn-sm" type="submit" aria-label="Delete {{ c.name }}" onclick='return confirm("Delete " + {{ c.name|tojson }} + "? Its dependency links and incident component links will be removed.")'>Delete</button></form></td>{% endif %}
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="empty">No components match these filters.</p>{% endif %}
+  {% include "partials/catalog_pagination.html" %}
 </div>
+{% if can_manage and (all_systems or draft) %}
+<div class="card"><h2>Add component</h2>
+  {% set form_values = draft %}{% set form_action = '/components' %}{% set submit_label = 'Add component' %}
+  {% include "partials/catalog_form.html" %}
+</div>
+{% elif can_manage %}<p class="muted"><a href="/systems">Create a system</a> before adding components.</p>{% endif %}
 {% endblock %}

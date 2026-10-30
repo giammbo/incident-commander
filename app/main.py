@@ -3,12 +3,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import Settings, get_settings
 from app.crypto import build_fernet, set_fernet
+from app.errors import browser_http_exception_handler, browser_validation_exception_handler
 from app.routers import account as account_router
 from app.routers import alerts as alerts_router
 from app.routers import auth as auth_router
@@ -23,6 +26,8 @@ from app.routers import insights as insights_router
 from app.routers import invites as invites_router
 from app.routers import maps as maps_router
 from app.routers import oidc_auth as oidc_auth_router
+from app.routers import oncall as oncall_router
+from app.routers import oncall_inbound as oncall_inbound_router
 from app.routers import postmortems as postmortems_router
 from app.routers import settings as settings_router
 from app.routers import users as users_router
@@ -66,9 +71,22 @@ def create_app() -> FastAPI:
             db.commit()
         finally:
             db_gen.close()
-        yield
+        worker = None
+        if settings.oncall_worker_in_process:
+            from app.services.oncall_worker import start_in_process
+
+            worker = start_in_process()
+        try:
+            yield
+        finally:
+            if worker is not None:
+                thread, stop = worker
+                stop.set()
+                thread.join(timeout=5)
 
     app = FastAPI(title="Incident Commander", lifespan=lifespan)
+    app.add_exception_handler(HTTPException, browser_http_exception_handler)
+    app.add_exception_handler(RequestValidationError, browser_validation_exception_handler)
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,
@@ -84,7 +102,10 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+        # Always 200 (probes): a stale/unknown worker is reported, never an error.
+        from app.services.oncall_worker import healthz_worker_status
+
+        return {"status": "ok", "oncall_worker": healthz_worker_status()}
 
     app.include_router(auth_router.router)
     app.include_router(oidc_auth_router.router)
@@ -103,6 +124,8 @@ def create_app() -> FastAPI:
     app.include_router(ingest_router.router)
     app.include_router(alerts_router.router)
     app.include_router(automation_router.router)
+    app.include_router(oncall_router.router)
+    app.include_router(oncall_inbound_router.router)
     return app
 
 

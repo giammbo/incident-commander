@@ -33,6 +33,17 @@ ingress:
   host: incident-commander.local
   tls: []        # e.g. [{ secretName: ic-tls, hosts: [incident-commander.example.com] }]
 
+# --- On-call worker ---
+# By default escalations are driven by a thread inside the app pod. Set
+# separate: true to run a dedicated `worker` Deployment instead (the app pods
+# then get ONCALL_WORKER_IN_PROCESS=false). Keep worker.replicaCount at 1-2:
+# the engine is multi-worker safe but more adds nothing.
+oncall:
+  worker:
+    separate: false
+    replicaCount: 1
+    resources: {}
+
 resources: {}
 nodeSelector: {}
 tolerations: []

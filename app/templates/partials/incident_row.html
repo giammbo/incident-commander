@@ -3,7 +3,7 @@
   <div class="inc-main">
     <a class="inc-title" href="/incidents/{{ i.id }}">{{ i.title }}</a>
     <div class="inc-meta">
-      <span>{{ i.created_at.strftime("%b %d · %H:%M") if i.created_at else "" }}</span>
+      <span>{{ i.created_at | time_tag if i.created_at else "" }}</span>
       {% if i.incident_type %}<span class="chip">{{ i.incident_type.label }}</span>{% endif %}
       {% if i.is_private %}<span class="lock">· private</span>{% endif %}
       {% if i.slack_channel_url %}<a class="chip" href="{{ i.slack_channel_url }}">Slack</a>{% endif %}
@@ -14,9 +14,10 @@
     <span class="dot" aria-hidden="true"></span>{{ i.status.label if i.status else '—' }}
   </span>
   <span class="row-actions">
-    {% if not i.is_closed %}
+    {% set role = effective_role(current_user) %}
+    {% if not i.is_closed and role and role.value in ("admin", "incident_commander") %}
       <button class="btn btn-sm" hx-post="/incidents/{{ i.id }}/close"
-              hx-target="#incident-{{ i.id }}" hx-swap="outerHTML">Close</button>
+              hx-confirm="Close this incident? Linked paging will stop; follow-ups remain open." hx-target="#incident-{{ i.id }}" hx-swap="outerHTML">Close</button>
     {% endif %}
   </span>
 </div>

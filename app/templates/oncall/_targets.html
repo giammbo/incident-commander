@@ -1,0 +1,8 @@
+{% macro targets(schedules, users, schedule_ids=[], user_ids=[]) %}
+<fieldset class="field-block"><legend>Schedules (whoever is on call)</legend>
+  <div class="dep-picker">{% for s in schedules %}<label class="dep-opt"><input type="checkbox" name="schedule_ids" value="{{ s.id }}"{% if s.id | string in schedule_ids | map('string') | list %} checked{% endif %}><span>{{ s.name }}</span></label>{% else %}<p class="muted">No schedules yet.</p>{% endfor %}</div>
+</fieldset>
+<fieldset class="field-block"><legend>People</legend>
+  <div class="dep-picker">{% for u in users %}<label class="dep-opt"><input type="checkbox" name="user_ids" value="{{ u.id }}"{% if u.id | string in user_ids | map('string') | list %} checked{% endif %}><span>{{ u.name }}</span></label>{% endfor %}</div>
+</fieldset>
+{% endmacro %}

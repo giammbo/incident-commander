@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "oncall/_page_badges.html" import status_badge, urgency_badge, age, paging_line %}
 {% block content %}
 {% set _role = effective_role(current_user) %}
 {% set _can_manage = _role and _role.value in ("admin", "incident_commander") %}
@@ -21,6 +22,37 @@
     {% if i.is_private %}<span>Private</span>{% endif %}
   </div>
 
+  {# --- respond (always visible) --- #}
+  {% if _can_manage and _is_open %}
+  <section class="respond">
+    <h2 class="section-title">Respond</h2>
+    {% if not _people %}<p class="muted">Start by <a href="/incidents/{{ i.id }}?tab=roles">assigning an incident lead</a>, then share your first update.</p>{% endif %}
+    <form method="post" action="/incidents/{{ i.id }}/updates"><input type="hidden" name="return_tab" value="{{ active_tab }}">
+      <textarea aria-label="Stakeholder update" name="message" placeholder="Post an update for stakeholders… (Markdown)" required style="width:100%"></textarea>
+      <div class="respond-row">
+        <select name="status_id" aria-label="Incident status"><option value="">— keep status —</option>{% for s in status_levels %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}</select>
+        <button class="btn btn-primary btn-sm" type="submit">Post update</button>
+      </div>
+    </form>
+    <form method="post" action="/incidents/{{ i.id }}/status" class="respond-row"
+          style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line-soft)"><input type="hidden" name="return_tab" value="{{ active_tab }}">
+      <span class="muted" style="font-family:var(--font-mono); font-size:11.5px">Change status only</span>
+      <select name="status_id" aria-label="Incident status">{% for s in status_levels %}<option value="{{ s.id }}"{% if s.id == i.status_id %} selected{% endif %}>{{ s.label }}</option>{% endfor %}</select>
+      <button class="btn btn-sm" type="submit">Update status</button>
+    </form>
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line-soft)">
+      <a class="btn btn-sm" href="/oncall/page?incident_id={{ i.id }}">Page someone</a>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if not _is_open %}
+  <section class="post-incident"><h2 class="section-title">After the incident</h2>
+    <p>Capture what happened and track the improvements.</p>
+    <div class="action-row"><a class="btn btn-primary" href="/incidents/{{ i.id }}/postmortem">{{ "View postmortem" if i.postmortem else ("Write postmortem" if _can_manage else "Postmortem") }}</a><a class="btn" href="/incidents/{{ i.id }}?tab=followups">Follow-ups{% if followups_open %} ({{ followups_open }} open){% endif %}</a></div>
+    {% if _can_manage %}<details><summary>Reopen incident</summary><form method="post" action="/incidents/{{ i.id }}/status" class="action-row"><input type="hidden" name="return_tab" value="{{ active_tab }}"><label>Reopen with status<select name="status_id">{% for status in status_levels if status.category.value != 'closed' %}<option value="{{ status.id }}">{{ status.label }}</option>{% endfor %}</select></label><button class="btn" type="submit">Reopen incident</button></form></details>{% endif %}
+  </section>
+  {% endif %}
   {% if i.description %}<div class="panel-desc">{{ i.description | markdown | safe }}</div>{% endif %}
 
   {% if "failed" in (i.creation_state or {}).values() %}
@@ -32,25 +64,31 @@
   {# --- tabs --- #}
   <div class="tabs">
     {% set _tab = active_tab | default("overview") %}
-    <input class="tab-radio" type="radio" name="inc-tab" id="tab-overview"{% if _tab == "overview" %} checked{% endif %}>
-    <input class="tab-radio" type="radio" name="inc-tab" id="tab-roles"{% if _tab == "roles" %} checked{% endif %}>
-    <input class="tab-radio" type="radio" name="inc-tab" id="tab-timeline"{% if _tab == "timeline" %} checked{% endif %}>
-    <input class="tab-radio" type="radio" name="inc-tab" id="tab-followups"{% if _tab == "followups" %} checked{% endif %}>
-    {% if i.alerts %}<input class="tab-radio" type="radio" name="inc-tab" id="tab-alerts"{% if _tab == "alerts" %} checked{% endif %}>{% endif %}
-    <nav class="tab-bar" role="tablist">
-      <label for="tab-overview">Overview</label>
-      <label for="tab-roles">Roles</label>
-      <label for="tab-timeline">Timeline</label>
-      <label for="tab-followups">Follow-ups{% if followups_open %} ({{ followups_open }}){% endif %}</label>
-      {% if i.alerts %}<label for="tab-alerts">Alerts</label>{% endif %}
+    <nav class="tab-bar" aria-label="Incident sections">
+      {% for tab, label in [("overview", "Overview"), ("roles", "Roles"), ("timeline", "Timeline"), ("followups", "Follow-ups"), ("alerts", "Alerts")] %}
+      {% if tab != 'alerts' or i.alerts %}<a id="tab-{{ tab }}" href="/incidents/{{ i.id }}?tab={{ tab }}"{% if _tab == tab %} class="active" aria-current="page"{% endif %}>{{ label }}{% if tab == 'followups' and followups_open %} ({{ followups_open }}){% endif %}</a>{% endif %}
+      {% endfor %}
     </nav>
 
-    <section class="tab-panel" id="panel-overview">
+    <section class="tab-panel" id="panel-overview"{% if _tab != "overview" %} hidden{% endif %}>
+      {% if active_pages %}
+      <section class="section">
+        <h2 class="section-title">Active pages</h2>
+        <ul class="pg-list">
+          {% for e in active_pages %}
+          <li class="pg-line">
+            <strong>{{ paging_line(e, paged_names[e.id]) }}</strong>
+            {{ status_badge(e) }} {{ urgency_badge(e) }} {{ age(e) }} <span class="muted">{{ e.created_at | time_tag }}</span>
+            <a href="/oncall/escalations/{{ e.id }}">Open</a></li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
       <section class="section">
         <h2 class="section-title">Details</h2>
         <dl class="kv">
-          <dt>Opened</dt><dd>{{ i.created_at.strftime("%Y-%m-%d %H:%M UTC") if i.created_at else "—" }}</dd>
-          {% if i.closed_at %}<dt>Closed</dt><dd>{{ i.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>{% endif %}
+          <dt>Opened</dt><dd>{{ i.created_at | time_tag("%Y-%m-%d %H:%M") }}</dd>
+          {% if i.closed_at %}<dt>Closed</dt><dd>{{ i.closed_at | time_tag("%Y-%m-%d %H:%M") }}</dd>{% endif %}
           <dt>Type</dt><dd>{{ i.incident_type.label if i.incident_type else "—" }}</dd>
         </dl>
 
@@ -87,7 +125,7 @@
         {% endif %}
 
         <dl class="kv">
-          <dt>Postmortem</dt><dd><a class="chip" href="/incidents/{{ i.id }}/postmortem">{{ "View" if i.postmortem else "Generate" }}</a></dd>
+          <dt>Postmortem</dt><dd><a class="chip" href="/incidents/{{ i.id }}/postmortem">{{ "View" if i.postmortem else ("Generate" if _can_manage else "Not started") }}</a></dd>
         </dl>
       </section>
 
@@ -99,7 +137,7 @@
             {% if i.slack_channel_url %}<a class="chip" href="{{ i.slack_channel_url }}">{{ i.slack_channel_name or "open" }}</a>
             {% elif _can_manage and _is_open and not i.slack_channel_id and slack_connections %}
             <form method="post" action="/incidents/{{ i.id }}/open-slack" style="display:inline-flex; gap:6px; align-items:center"><input type="hidden" name="return_tab" value="overview">
-              <select name="slack_connection_id">{% for c in slack_connections %}<option value="{{ c.id }}">{{ c.team_name or c.team_id }}</option>{% endfor %}</select>
+              <select name="slack_connection_id" aria-label="Slack workspace">{% for c in slack_connections %}<option value="{{ c.id }}">{{ c.team_name or c.team_id }}</option>{% endfor %}</select>
               <button class="btn btn-sm" type="submit">Open channel</button>
             </form>
             {% else %}—{% endif %}
@@ -122,7 +160,7 @@
         <form method="post" action="/incidents/{{ i.id }}/edit" style="margin-top:.75rem"><input type="hidden" name="return_tab" value="overview">
           <div style="margin-bottom:.5rem">
             <label for="edit-title">Title</label><br>
-            <input id="edit-title" name="title" type="text" value="{{ i.title }}" required style="width:100%">
+            <input id="edit-title" name="title" type="text" maxlength="300" value="{{ i.title }}" required style="width:100%">
           </div>
           <div style="margin-bottom:.5rem">
             <label for="edit-description">Description</label><br>
@@ -131,7 +169,7 @@
           {% if incident_types %}
           <div style="margin-bottom:.5rem">
             <label for="edit-type">Type</label><br>
-            <select id="edit-type" name="incident_type_id">
+            <select id="edit-type" name="incident_type_id" hx-get="/incidents/type-options" hx-target="#edit-type-driven" hx-swap="innerHTML" hx-trigger="change">
               <option value="">No type</option>
               {% for t in incident_types %}
               <option value="{{ t.id }}"{% if t.id == i.incident_type_id %} selected{% endif %}>{{ t.label }}</option>
@@ -139,6 +177,7 @@
             </select>
           </div>
           {% endif %}
+          <div id="edit-type-driven">
           <div style="margin-bottom:.5rem">
             <label for="edit-severity">Severity</label><br>
             <select id="edit-severity" name="severity_level_id" required>
@@ -146,6 +185,8 @@
               <option value="{{ lvl.id }}"{% if lvl.id == i.severity_level_id %} selected{% endif %}>{{ lvl.label }}</option>
               {% endfor %}
             </select>
+          </div>
+          {% with fields=edit_fields | default(custom_fields), values=custom_values %}{% include "partials/custom_field_inputs.html" %}{% endwith %}
           </div>
           {% if systems %}
           <div style="margin-bottom:.5rem">
@@ -159,7 +200,7 @@
           <div style="margin-bottom:.5rem">
             <label for="edit-components">Affected components</label><br>
             <select id="edit-components" name="component_ids" multiple size="4" style="width:100%">
-              {% if i.system %}{% for c in i.system.components %}<option value="{{ c.id }}"{% if c in i.components %} selected{% endif %}>{{ c.name }}</option>{% endfor %}{% endif %}
+              {% for c in edit_components | default(i.system.components if i.system else []) %}<option value="{{ c.id }}"{% if c in i.components %} selected{% endif %}>{{ c.name }}</option>{% endfor %}
             </select>
           </div>
           {% endif %}
@@ -169,9 +210,10 @@
       {% endif %}
     </section>
 
-    <section class="tab-panel" id="panel-roles">
+    <section class="tab-panel" id="panel-roles"{% if _tab != "roles" %} hidden{% endif %}>
       <section class="section">
         <h2 class="section-title">Roles</h2>
+        {% if i.is_private %}<p class="muted">Assigning a role grants access to this private incident. Read-only members can view it but cannot make changes.</p>{% endif %}
         {% for rt in role_types %}
         {% set _assigned = role_assignees.get(rt.id, []) %}
         {% set _assigned_ids = _assigned | map(attribute='id') | list %}
@@ -184,7 +226,7 @@
           <summary>Assign</summary>
           <form method="post" action="/incidents/{{ i.id }}/roles" style="margin-top:6px; display:flex; gap:6px; align-items:flex-start"><input type="hidden" name="return_tab" value="roles">
             <input type="hidden" name="role_type_id" value="{{ rt.id }}">
-            <select name="user_ids" multiple size="3">
+            <select name="user_ids" aria-label="People assigned to {{ rt.label }}" multiple size="3">
               {% for u in assignable_users %}<option value="{{ u.id }}"{% if u.id in _assigned_ids %} selected{% endif %}>{{ u.name }}</option>{% endfor %}
             </select>
             <button class="btn btn-sm" type="submit">Save</button>
@@ -196,12 +238,12 @@
       </section>
     </section>
 
-    <section class="tab-panel" id="panel-timeline">
+    <section class="tab-panel" id="panel-timeline"{% if _tab != "timeline" %} hidden{% endif %}>
       <section class="section">
         <h2 class="section-title">Timeline</h2>
         {% if _can_manage %}
         <form method="post" action="/incidents/{{ i.id }}/notes" style="margin-bottom:12px"><input type="hidden" name="return_tab" value="timeline">
-          <textarea name="body" placeholder="Add a note (Markdown supported)…" required style="width:100%"></textarea>
+          <textarea aria-label="Timeline note" name="body" placeholder="Add a note (Markdown supported)…" required style="width:100%"></textarea>
           <div style="margin-top:6px"><button class="btn btn-sm" type="submit">Add note</button></div>
         </form>
         {% endif %}
@@ -210,7 +252,7 @@
           <div class="inc-meta" style="margin:0">
             {% if e.pinned %}<span title="pinned">📌</span> {% endif %}
             {% if e.entry_type == "update" %}<span title="stakeholder update">📣</span> {% endif %}
-            <span>{{ e.created_at.strftime("%b %d · %H:%M") if e.created_at else "" }}</span>
+            <span>{{ e.created_at | time_tag("%b %d · %H:%M") if e.created_at else "" }}</span>
             <span>· {{ e.created_by_user.name if e.created_by_user else "system" }}</span>
             {% if _can_manage %}
             <form method="post" action="/incidents/{{ i.id }}/events/{{ e.id }}/pin" style="display:inline"><input type="hidden" name="return_tab" value="timeline">
@@ -235,16 +277,16 @@
       </section>
     </section>
 
-    <section class="tab-panel" id="panel-followups">
+    <section class="tab-panel" id="panel-followups"{% if _tab != "followups" %} hidden{% endif %}>
       <section class="section">
         <h2 class="section-title">Follow-ups{% if followups_open %} <span class="count">{{ followups_open }} open</span>{% endif %}</h2>
         {% if _can_manage %}
         <form method="post" action="/incidents/{{ i.id }}/followups" style="margin-bottom:12px"><input type="hidden" name="return_tab" value="followups">
-          <input name="title" placeholder="Action item…" required maxlength="300" style="width:100%; margin-bottom:6px">
-          <textarea name="description" placeholder="Details (optional)" style="width:100%; margin-bottom:6px"></textarea>
+          <input name="title" aria-label="Follow-up title" placeholder="Action item…" required maxlength="300" style="width:100%; margin-bottom:6px">
+          <textarea aria-label="Follow-up description" name="description" placeholder="Details (optional)" style="width:100%; margin-bottom:6px"></textarea>
           <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center">
-            <select name="assignee_id"><option value="">Unassigned</option>{% for u in assignable_users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}</select>
-            <input type="date" name="due_on">
+            <select name="assignee_id" aria-label="Follow-up owner"><option value="">Unassigned</option>{% for u in assignable_users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}</select>
+            <input type="date" name="due_on" aria-label="Due date">
             <button class="btn btn-sm" type="submit">Add follow-up</button>
           </div>
         </form>
@@ -257,10 +299,11 @@
           </div>
           <div class="inc-meta" style="margin-top:3px">
             <span>{{ f.assignee.name if f.assignee else "unassigned" }}</span>
-            {% if f.due_on %}<span>· due {{ f.due_on.strftime("%b %d") }}</span>{% endif %}
+            {% if f.due_on %}<span>{{ "Overdue" if f.is_open and f.due_on < today else "Due" }} {{ f.due_on.strftime("%d %b %Y") }}</span>{% endif %}
           </div>
           {% if f.description %}<div style="margin-top:3px" class="muted">{{ f.description }}</div>{% endif %}
           {% if _can_manage %}
+          {% with return_tab="followups", users=assignable_users %}{% include "partials/followup_edit.html" %}{% endwith %}
           <div style="margin-top:5px; display:flex; gap:6px; flex-wrap:wrap">
             {% if f.is_open %}
             <form method="post" action="/followups/{{ f.id }}/status" style="display:inline"><input type="hidden" name="return_tab" value="followups"><input type="hidden" name="status" value="completed"><button class="chip" type="submit">complete</button></form>
@@ -279,7 +322,7 @@
     </section>
 
     {% if i.alerts %}
-    <section class="tab-panel" id="panel-alerts">
+    <section class="tab-panel" id="panel-alerts"{% if _tab != "alerts" %} hidden{% endif %}>
       <section class="section">
         <h2 class="section-title">Related alerts</h2>
         {% for a in i.alerts %}
@@ -294,25 +337,6 @@
     {% endif %}
   </div>
 
-  {# --- respond (always visible) --- #}
-  {% if _can_manage %}
-  <section class="respond">
-    <h2 class="section-title">Respond</h2>
-    <form method="post" action="/incidents/{{ i.id }}/updates"><input type="hidden" name="return_tab" value="timeline">
-      <textarea name="message" placeholder="Post an update for stakeholders… (Markdown)" required style="width:100%"></textarea>
-      <div class="respond-row">
-        <select name="status_id"><option value="">— keep status —</option>{% for s in status_levels %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}</select>
-        <button class="btn btn-primary btn-sm" type="submit">Post update</button>
-      </div>
-    </form>
-    <form method="post" action="/incidents/{{ i.id }}/status" class="respond-row"
-          style="margin-top:14px; padding-top:14px; border-top:1px solid var(--line-soft)"><input type="hidden" name="return_tab" value="timeline">
-      <span class="muted" style="font-family:var(--font-mono); font-size:11.5px">Change status only</span>
-      <select name="status_id">{% for s in status_levels %}<option value="{{ s.id }}"{% if s.id == i.status_id %} selected{% endif %}>{{ s.label }}</option>{% endfor %}</select>
-      <button class="btn btn-sm" type="submit">Update status</button>
-    </form>
-  </section>
-  {% endif %}
   <a class="backlink" href="/">← All incidents</a>
 </div>
 {% endblock %}

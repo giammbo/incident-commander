@@ -1,3 +1,3 @@
-<p>You've been invited to <strong>Incident Commander</strong>.</p>
-<p><a href="{{ accept_url }}">Set your password and activate your account</a></p>
+{% if password_reset %}<p>An administrator requested a password reset for your <strong>Incident Commander</strong> account. Your current password is unchanged until you use this link.</p>{% else %}<p>You've been invited to <strong>Incident Commander</strong>.</p>{% endif %}
+<p><a href="{{ accept_url }}">{{ 'Set a new password' if password_reset else 'Set your password and activate your account' }}</a></p>
 <p>This link expires in {{ ttl_hours }} hours. If you weren't expecting this, you can ignore this email.</p>

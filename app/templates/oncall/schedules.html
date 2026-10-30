@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('schedules', current_user) }}
+<div class="page-head"><h1>Schedules</h1></div>
+<p class="page-sub">Rotations, layers and overrides that decide who is on call.</p>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+
+<div class="card">
+  {% if schedules %}
+  <table class="tbl">
+    <thead><tr><th>Name</th><th>Timezone</th><th>Rotations</th><th></th></tr></thead>
+    <tbody>
+      {% for s in schedules %}
+      <tr>
+        <td><a href="/oncall/schedules/{{ s.id }}">{{ s.name }}</a></td>
+        <td class="muted">{{ s.timezone }}</td>
+        <td>{{ s.rotations | length }}</td>
+        <td>
+          {% if can_manage %}
+          <form method="post" action="/oncall/schedules/{{ s.id }}/delete" style="display:inline">
+            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ s.name|tojson }} + "?")'>Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No schedules yet.</p>{% endif %}
+
+  {% if can_manage %}
+  <h3 style="margin:16px 0 10px">Add schedule</h3>
+  <form method="post" action="/oncall/schedules">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120" value="{{ draft.get('name', '') }}"></label>
+      <label class="field-block grow"><span>Timezone (IANA)</span><input name="timezone" required value="{{ draft.get('timezone', 'UTC') }}" placeholder="Europe/Rome"></label>
+      <label class="field-block"><span>Team</span>
+        <select name="team_id"><option value="">—</option>
+          {% for t in teams %}<option value="{{ t.id }}"{% if draft.get('team_id') == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <button class="btn btn-primary" type="submit">Add schedule</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

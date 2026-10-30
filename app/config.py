@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # Mark the session cookie Secure (HTTPS-only). Defaults True for the
     # production HTTPS posture; set SESSION_HTTPS_ONLY=false for plain-HTTP local dev.
     session_https_only: bool = True
+    # Run the on-call worker as a thread inside the web process. Set false when a
+    # separate `worker` process/Deployment drives escalations.
+    oncall_worker_in_process: bool = True
 
     @field_validator("fernet_keys", mode="before")
     @classmethod

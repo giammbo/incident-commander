@@ -1,49 +1,24 @@
 {% extends "base.html" %}
 {% from "partials/dep_picker.html" import dep_picker %}
 {% block content %}
-<div class="page-head"><h1>{{ s.name }}</h1></div>
+<div class="page-head"><h1>{{ s.name }}</h1><a class="btn" href="/maps?node=sys-{{ s.id }}#map-node-sys-{{ s.id }}">View on map</a></div>
 {% set _role = effective_role(current_user) %}
 {% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
-{% if s.description %}<p class="muted">{{ s.description }}</p>{% endif %}
-<p class="muted">Owner: {{ s.owner_team.name if s.owner_team else '—' }}</p>
-
-<div class="card">
-  <h2>Components</h2>
-  {% if s.components %}
-  <ul>{% for c in s.components %}<li><strong>{{ c.name }}</strong>{% if c.depends_on %} <span class="muted">→ {{ c.depends_on | map(attribute='name') | join(', ') }}</span>{% endif %}</li>{% endfor %}</ul>
-  {% else %}<p class="muted">No components.</p>{% endif %}
+{% if s.description %}<p>{{ s.description }}</p>{% endif %}
+<p class="muted">Owner: {{ s.owner_team.name if s.owner_team else 'No owner team' }}</p>
+<div class="card"><h2>Components</h2>
+<a href="/components?system_id={{ s.id }}">Browse components in {{ s.name }}</a>
+{% if s.components %}<ul>{% for c in s.components %}<li><a href="/components/{{ c.id }}">{{ c.name }}</a>{% if c.depends_on %} · Depends on {% for d in c.depends_on %}<a href="/components/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% endfor %}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="muted">No components.</p>{% endif %}
 </div>
-
-<div class="card">
-  <h2>Dependencies</h2>
-  <div class="dep-cell">
-    {% if s.depends_on %}<div>{{ s.name }} depends on → {{ s.depends_on | map(attribute='name') | sort | join(', ') }}</div>
-    {% else %}<div class="muted">{{ s.name }} doesn't depend on other systems.</div>{% endif %}
-    {% if used_by %}<div class="dep-usedby">used by {{ used_by | map(attribute='name') | join(', ') }}</div>{% endif %}
-    {% if can_manage %}
-      {% if other_systems %}{{ dep_picker("/systems/" ~ s.id ~ "/deps", s, other_systems, blocked) }}
-      {% else %}<div class="dep-usedby">No other systems to depend on yet.</div>{% endif %}
-    {% endif %}
-  </div>
+<div class="card"><h2>Dependencies</h2>
+<p>Depends on: {% for d in s.depends_on %}<a href="/systems/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% else %}None{% endfor %}</p>
+{% if used_by %}<p class="dep-usedby">used by {{ used_by | map(attribute='name') | join(', ') }} · {% for d in used_by %}<a href="/systems/{{ d.id }}">{{ d.name }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+{% if can_manage and other_systems %}{{ dep_picker('/systems/' ~ s.id ~ '/deps', s, other_systems, blocked) }}{% endif %}
 </div>
-
-{% if can_manage %}
-<div class="card">
-  <h2>Edit system</h2>
-  <form method="post" action="/systems/{{ s.id }}/edit">
-    <div class="form-row">
-      <label class="field-block grow"><span>Name</span><input name="name" value="{{ s.name }}" required></label>
-      <label class="field-block grow"><span>Description</span><input name="description" value="{{ s.description or '' }}"></label>
-    </div>
-    <label class="field-block"><span>Owner team</span>
-      <select name="owner_team_id">
-        <option value="">—</option>
-        {% for t in teams %}<option value="{{ t.id }}"{% if s and s.owner_team_id == t.id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
-      </select>
-    </label>
-    <button class="btn btn-primary" type="submit">Save</button>
-  </form>
-</div>
-{% endif %}
+{% set item_kind = 'system' %}{% include "partials/catalog_incidents.html" %}
+{% if can_manage %}<div class="card"><h2>Edit system</h2>
+{% set catalog_kind = 'systems' %}{% set editing = true %}{% set form_values = draft if draft is not none else s %}{% set form_action = '/systems/' ~ s.id ~ '/edit' %}{% set submit_label = 'Save system' %}
+{% include "partials/catalog_form.html" %}
+</div>{% endif %}
 <a class="backlink" href="/systems">← All systems</a>
 {% endblock %}

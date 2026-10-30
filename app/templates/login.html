@@ -4,9 +4,10 @@
   <form class="auth-card" method="post" action="/login">
     <div class="mark">Incident Commander</div>
     <h1>Sign in</h1>
-    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-    <label class="field"><span>Email</span><input type="email" name="email" required autofocus></label>
-    <label class="field"><span>Password</span><input type="password" name="password" required></label>
+    {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+    <input type="hidden" name="next" value="{{ next or '/' }}">
+    <label class="field"><span>Email</span><input type="email" name="email" value="{{ email or '' }}" autocomplete="username" required autofocus></label>
+    <label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
     <button class="btn btn-primary" type="submit">Sign in</button>
     {% if sso_enabled %}
     <div class="auth-or" aria-hidden="true">or</div>

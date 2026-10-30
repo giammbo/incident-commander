@@ -43,7 +43,7 @@ def test_detail_renders_tab_scaffold(client, db_session):
     inc = _incident(db_session)
     db_session.commit()
     body = client.get(f"/incidents/{inc.id}").text
-    # tab radios + labels
+    # Native section links work without custom keyboard handling.
     assert (
         'id="tab-overview"' in body and 'id="tab-timeline"' in body and 'id="tab-followups"' in body
     )
@@ -79,13 +79,11 @@ def test_alerts_tab_appears_with_related_alert(client, db_session):
 
 
 def _checked_tab(body: str) -> str | None:
-    """Return the id of the tab radio rendered with `checked`."""
+    """Read the active native navigation link."""
     import re
 
-    m = re.search(
-        r'<input class="tab-radio" type="radio" name="inc-tab" id="(tab-[a-z]+)" checked', body
-    )
-    return m.group(1) if m else None
+    match = re.search(r'<a id="(tab-[a-z]+)"[^>]*aria-current="page"', body)
+    return match.group(1) if match else None
 
 
 def test_detail_defaults_to_overview_tab(client, db_session):
@@ -96,7 +94,7 @@ def test_detail_defaults_to_overview_tab(client, db_session):
 
 
 @pytest.mark.parametrize("tab", ["overview", "roles", "timeline", "followups"])
-def test_detail_tab_query_selects_radio(client, db_session, tab):
+def test_detail_tab_query_selects_navigation(client, db_session, tab):
     _login_ic(client, db_session)
     inc = _incident(db_session)
     db_session.commit()

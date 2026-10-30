@@ -1,0 +1,5 @@
+<div class="card"><h2>Recent incidents</h2>
+<p class="muted">The latest 20 incidents you can access for this {{ item_kind }}.</p>
+{% if incidents %}<ul>{% for i in incidents %}<li><a href="/incidents/{{ i.id }}">{{ i.title }}</a> · {{ i.status.label if i.status else 'No status' }}</li>{% endfor %}</ul>
+{% else %}<p class="muted">No visible incidents for this {{ item_kind }}.</p>{% endif %}
+</div>

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{ error_title }} · Incident Commander</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="main main-plain" id="main-content">
+    <div class="auth"><div class="auth-card">
+      <a class="brand" href="/">Incident Commander</a>
+      {% if error_email %}<p class="muted">Signed in as {{ error_email }}</p>{% endif %}
+      {% include "partials/error.html" %}
+    </div></div>
+  </main>
+</body>
+</html>

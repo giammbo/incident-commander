@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,9 @@ _ROLE_GROUP_NAME = {
 
 def _norm(email: str) -> str:
     return email.strip().lower()
+
+
+DEFAULT_ADMIN_NAME = "Administrator"
 
 
 def _get_or_create_group(db: Session, role: Role) -> Group:
@@ -36,7 +41,7 @@ def bootstrap_admin(db: Session, admin_email: str) -> tuple[User, str | None]:
     password = generate_password()
     admin = User(
         email=_norm(admin_email),
-        name="Administrator",
+        name=DEFAULT_ADMIN_NAME,
         password_hash=hash_password(password),
         is_protected_admin=True,
         must_change_password=True,
@@ -57,6 +62,11 @@ def create_user(
     must_change_password: bool = False,
 ) -> User:
     norm = _norm(email)
+    name = name.strip()
+    if not 1 <= len(name) <= 200:
+        raise ValueError("Enter a name between 1 and 200 characters")
+    if len(norm) > 320 or not re.fullmatch(r"[^@\s]+@[^@\s]+", norm):
+        raise ValueError("Enter a valid email address (up to 320 characters)")
     if db.scalar(select(User).where(func.lower(User.email) == norm)):
         raise ValueError(f"A user with email {norm} already exists")
     group = _get_or_create_group(db, role)

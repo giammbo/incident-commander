@@ -12,10 +12,12 @@ router = APIRouter()
 
 
 @router.get("/maps", response_class=HTMLResponse)
-def maps_page(request: Request, user: User = Depends(require_user)):
-    return templates.TemplateResponse(request, "maps.html", {"current_user": user})
+def maps_page(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    return templates.TemplateResponse(
+        request, "maps.html", {"current_user": user, "graph": build_graph(db, user=user)}
+    )
 
 
 @router.get("/maps/graph.json")
 def maps_graph(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    return JSONResponse(build_graph(db))
+    return JSONResponse(build_graph(db, user=user), headers={"Cache-Control": "no-store"})

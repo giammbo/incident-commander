@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Local preview: {{ hook.name }}</h1></div>
+<div class="card">
+  <p role="status">No request was sent. This synthetic payload only checks the local formatter; receiver connectivity and authorization have not been tested.</p>
+  <p>Destination: {{ destination }}</p>
+  <p>Delivery: {{ 'enabled' if hook.enabled else 'disabled' }} · Format: {{ hook.format.value }} · Signing header: {{ 'X-IC-Signature (value hidden)' if hook.secret else 'none' }}</p>
+  <pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ payload }}</pre>
+</div>
+<a class="btn" href="/settings#webhooks">Back to outgoing webhooks</a>
+{% endblock %}

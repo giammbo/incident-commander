@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% from "oncall/route_form.html" import fields %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('routes', current_user) }}
+<div class="page-head"><h1>Alert routes</h1></div>
+<p class="page-sub">The first enabled route that matches an incoming alert (in this order) pages its escalation path. Alerts that match no route stay in the inbox only.</p>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+
+<div class="card">
+  {% if routes %}
+  <table class="tbl">
+    <thead><tr><th>#</th><th>Route</th><th></th></tr></thead>
+    <tbody>
+      {% for r in routes %}
+      <tr{% if not r.enabled %} class="muted"{% endif %}>
+        <td>{{ loop.index }}</td>
+        <td><a href="/oncall/routes/{{ r.id }}"><strong>{{ r.name }}</strong></a>{% if not r.enabled %} <span class="chip">disabled</span>{% endif %}
+          <div class="muted">{{ sentences[r.id] }}</div></td>
+        <td>
+          {% if can_manage %}
+          <form method="post" action="/oncall/routes/{{ r.id }}/move" style="display:inline">
+            <button class="btn btn-sm" name="direction" value="up" type="submit"{% if loop.first %} disabled{% endif %} aria-label="Move up">↑</button>
+            <button class="btn btn-sm" name="direction" value="down" type="submit"{% if loop.last %} disabled{% endif %} aria-label="Move down">↓</button>
+          </form>
+          <form method="post" action="/oncall/routes/{{ r.id }}/toggle" style="display:inline">
+            <button class="btn btn-sm" type="submit">{{ 'Disable' if r.enabled else 'Enable' }}</button>
+          </form>
+          <form method="post" action="/oncall/routes/{{ r.id }}/delete" style="display:inline">
+            <button class="btn btn-sm" type="submit" onclick='return confirm("Delete " + {{ r.name|tojson }} + "?")'>Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No routes yet. Alerts are only shown in the inbox.</p>{% endif %}
+
+  {% if can_manage %}
+  <h3 style="margin:16px 0 10px">Add route</h3>
+  {% if paths %}
+  <form method="post" action="/oncall/routes">
+    {{ fields(None, paths, route_fields, cond_rows, high_rows, urgency_mode, draft) }}
+    <button class="btn btn-primary" type="submit">Add route</button>
+  </form>
+  {% else %}<p class="muted">Create an <a href="/oncall/escalation-paths">escalation path</a> first.</p>{% endif %}
+  {% endif %}
+</div>
+<div class="card" id="test-routes">
+  <h2>Test alert routing</h2>
+  <p class="muted">Enter an example alert to see the first enabled match, escalation path and urgency. This test does not send a page or create an alert.</p>
+  <form method="post" action="/oncall/routes/preview" hx-post="/oncall/routes/preview" hx-target="#route-test-result">
+    <div class="form-row">
+      <label class="field-block grow"><span>Alert title</span><input name="title" maxlength="500" value="{{ route_sample.get('title', '') }}"></label>
+      <label class="field-block"><span>Source</span><input name="source" maxlength="200" value="{{ route_sample.get('source', '') }}"></label>
+      <label class="field-block"><span>Severity (as sent)</span><input name="severity_raw" maxlength="200" value="{{ route_sample.get('severity_raw', '') }}"></label>
+      <label class="field-block"><span>Integration</span><select name="integration_id"><option value="">— none —</option>{% for id, name in integrations.items() %}<option value="{{ id }}"{% if route_sample.get('integration_id') == id %} selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+    </div>
+    <button class="btn" type="submit">Test routes</button>
+  </form>
+  <div id="route-test-result" aria-live="polite">{% include "oncall/_route_preview.html" %}</div>
+</div>
+{% endblock %}

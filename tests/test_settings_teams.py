@@ -21,7 +21,10 @@ def _admin(client, db_session):
     _, pw = bootstrap_admin(db_session, "admin@localhost")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
 
 def test_admin_creates_team(client, db_session):
@@ -52,7 +55,7 @@ def test_delete_in_use_flashes(client, db_session):
     create_system(db_session, name="Core", owner_team_id=t.id)
     db_session.commit()
     r = client.post(f"/settings/teams/{t.id}/delete", follow_redirects=False)
-    assert r.status_code == 303
+    assert r.status_code == 422
     # team still exists
     assert db_session.get(Team, t.id) is not None
 

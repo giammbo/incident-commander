@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,7 +37,13 @@ TRIGGER_ACTIONS = {
 _INT_FIELDS = {"severity", "type", "system"}  # condition values coerced to int
 
 
-def create_rule(db: Session, *, name, trigger, conditions, actions, rank=100) -> WorkflowRule:
+def validate_rule(db, *, name, trigger, conditions, actions):
+    from app.models import IncidentRoleType, IncidentType, SeverityLevel, StatusLevel, System, User
+    from app.services.settings_catalog import text
+
+    name = text(name, "Rule name", 200)
+    if not actions:
+        raise ValueError("Choose at least one complete action before enabling a rule.")
     if trigger not in TRIGGERS:
         raise ValueError("Unknown trigger")
     # Reject action/condition fields that don't belong to this trigger, so the
@@ -51,8 +59,78 @@ def create_rule(db: Session, *, name, trigger, conditions, actions, rank=100) ->
             raise ValueError(
                 f"Condition field '{c.get('field')}' is not valid for trigger '{trigger}'"
             )
+    catalogs = {"severity": SeverityLevel, "type": IncidentType, "system": System}
+    for c in conditions or []:
+        op, value, field = c.get("op"), c.get("value"), c.get("field")
+        if op not in ("equals", "in") or value is None or value == []:
+            raise ValueError("Choose a valid condition operator and value.")
+        if (
+            op == "in"
+            and not isinstance(value, list)
+            or op == "equals"
+            and isinstance(value, (list, dict))
+        ):
+            raise ValueError("Choose condition values appropriate to the operator.")
+        values = value if op == "in" else [value]
+        if field in catalogs:
+            for key in values:
+                # Legacy JSONB string IDs remain unchanged in storage.
+                if (
+                    isinstance(key, bool)
+                    or not isinstance(key, (str, int))
+                    or not str(key).isascii()
+                    or not str(key).isdigit()
+                    or not 0 < int(key) <= 2147483647
+                ):
+                    raise ValueError("Choose an existing catalog record for the condition.")
+                if db.get(catalogs[field], int(key)) is None:
+                    raise ValueError(
+                        "A selected condition record no longer exists. Choose an existing catalog record."
+                    )
+        elif field == "status" and any(v not in ("firing", "resolved") for v in values):
+            raise ValueError("Choose Firing or Resolved for the alert status condition.")
+        elif field == "is_private" and (op != "equals" or type(value) is not bool):
+            raise ValueError("Choose whether the incident is private.")
+        elif field in ("source", "severity_raw") and any(
+            not isinstance(v, str) or not v.strip() for v in values
+        ):
+            raise ValueError("Enter a text value for the condition.")
+    for a in actions:
+        p = a.get("params") or {}
+        t = a["type"]
+        if t == "post_update":
+            text(p.get("message"), "Update message", 10000)
+        elif t == "create_followup":
+            text(p.get("title"), "Follow-up title", 300)
+        references = []
+        if t == "set_status":
+            references.append((StatusLevel, p.get("status_id"), True))
+        if t == "assign_role":
+            references.append((IncidentRoleType, p.get("role_type_id"), True))
+            if not p.get("user_ids"):
+                raise ValueError("Choose at least one person to assign.")
+            references.extend((User, uid, True) for uid in p["user_ids"])
+        if t == "create_followup":
+            references.append((User, p.get("assignee_id"), False))
+        if t == "create_incident":
+            references.extend(
+                [
+                    (SeverityLevel, p.get("severity_level_id"), False),
+                    (IncidentType, p.get("incident_type_id"), False),
+                ]
+            )
+        for model, key, required in references:
+            if (required or key is not None) and (
+                not isinstance(key, int) or db.get(model, key) is None
+            ):
+                raise ValueError("Choose existing records for the action parameters.")
+    return name
+
+
+def create_rule(db: Session, *, name, trigger, conditions, actions, rank=100) -> WorkflowRule:
+    name = validate_rule(db, name=name, trigger=trigger, conditions=conditions, actions=actions)
     rule = WorkflowRule(
-        name=(name or "").strip() or "Untitled rule",
+        name=name,
         trigger=trigger,
         conditions=conditions,
         actions=actions,
@@ -80,6 +158,14 @@ def delete_rule(db: Session, rule_id: int) -> None:
 def toggle_rule(db: Session, rule_id: int) -> None:
     rule = db.get(WorkflowRule, rule_id)
     if rule is not None:
+        if not rule.enabled:
+            validate_rule(
+                db,
+                name=rule.name,
+                trigger=rule.trigger,
+                conditions=rule.conditions,
+                actions=rule.actions,
+            )
         rule.enabled = not rule.enabled
 
 
@@ -109,6 +195,13 @@ def _matches(conditions, subject) -> bool:
         if actual is _MISSING:
             return False
         expected = c.get("value")
+        if c.get("field") in _INT_FIELDS:
+            try:
+                expected = (
+                    [int(v) for v in expected] if isinstance(expected, list) else int(expected)
+                )
+            except (ValueError, TypeError):
+                return False
         if expected is None:
             # a None/missing comparison value is a misconfigured condition, not a
             # "match anything whose field is unset" wildcard — never match on it.
@@ -142,12 +235,16 @@ def run_rules(db: Session, *, trigger, incident=None, alert=None, by_user=None) 
         # Where to record this rule on the timeline: the incident itself, or — for an
         # alert trigger — the incident the alert is already linked to (e.g. a re-fire).
         target = incident if incident is not None else _linked_incident(db, alert)
+        succeeded, failed = 0, 0
         for action in rule.actions or []:
             try:
-                new_inc = _execute_action(
-                    db, action, rule=rule, incident=incident, alert=alert, by_user=by_user
-                )
+                # A bad DB action must not poison the transaction or erase other outcomes.
+                with db.begin_nested():
+                    new_inc = _execute_action(
+                        db, action, rule=rule, incident=incident, alert=alert, by_user=by_user
+                    )
             except Exception:  # noqa: BLE001 — partial-failure-safe; one bad action must not 500
+                failed += 1
                 _log(
                     db,
                     target,
@@ -155,8 +252,22 @@ def run_rules(db: Session, *, trigger, incident=None, alert=None, by_user=None) 
                     by_user,
                 )
             else:
+                succeeded += 1
                 if new_inc is not None:
                     created.append(new_inc)
+        rule.last_run_at = datetime.now(UTC)
+        rule.last_run_outcome = (
+            "partial"
+            if failed and succeeded
+            else "failed"
+            if failed
+            else "succeeded"
+            if succeeded
+            else "no_actions"
+        )
+        rule.last_run_summary = f"{succeeded} action(s) completed; {failed} failed." + (
+            " Review action configuration and provider availability." if failed else ""
+        )
         if incident is not None:
             _log(db, incident, f"Automation '{rule.name}' ran", by_user)
         elif target is not None:
@@ -192,11 +303,14 @@ def _execute_action(db, action, *, rule, incident, alert, by_user):
     if t == "open_slack_channel":
         if incident is not None and not incident.slack_channel_id:
             conn = db.scalar(select(SlackConnection).order_by(SlackConnection.id))
-            if conn is not None:
-                from app.services import providers
+            if conn is None:
+                raise ValueError("No Slack workspace configured")
+            from app.services import providers
 
-                incident.slack_connection_id = conn.id
-                providers.CHAT_PROVIDERS["slack"].open_room(db, incident, connection=conn)
+            incident.slack_connection_id = conn.id
+            providers.CHAT_PROVIDERS["slack"].open_room(db, incident, connection=conn)
+            if not incident.slack_channel_id:
+                raise ValueError("Slack channel could not be created")
     elif t == "assign_role":
         from app.services.incidents import set_incident_role_assignees
 

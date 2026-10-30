@@ -19,7 +19,10 @@ def _admin(client, db_session):
     _, pw = bootstrap_admin(db_session, "admin@localhost")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
 
 def test_settings_shows_connect_buttons_when_configured(client, db_session):
@@ -60,7 +63,7 @@ def test_settings_google_sa_card_present(client, db_session):
     assert 'name="impersonate_email"' in html
     # The old OAuth fields are gone from the Google card specifically
     # (client_id still legitimately appears in the Slack + SSO cards).
-    google_card = html.split(">Google<", 1)[1].split('<div class="card"', 1)[0]
+    google_card = html.split('id="google"', 1)[1].split("</section>", 1)[0]
     assert 'name="client_id"' not in google_card
     assert 'name="client_secret"' not in google_card
     assert "/connections/google/connect" not in html

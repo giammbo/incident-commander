@@ -29,6 +29,22 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
 
+  # On-call escalations are driven by a worker thread inside `app` by default
+  # (ONCALL_WORKER_IN_PROCESS=true). To run it as its own process instead,
+  # uncomment this service AND set ONCALL_WORKER_IN_PROCESS: "false" on `app`.
+  # worker:
+  #   build: .
+  #   command: ["worker"]
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ic}:${POSTGRES_PASSWORD:-ic}@db:5432/${POSTGRES_DB:-incident_commander}
+  #     SESSION_SECRET: ${SESSION_SECRET}
+  #     FERNET_KEYS: ${FERNET_KEYS}
+  #     BASE_URL: ${BASE_URL:-http://localhost:8000}
+  #     ONCALL_WORKER_IN_PROCESS: "false"
+
   mailpit:
     image: axllent/mailpit:v1.21
     profiles: ["dev"]

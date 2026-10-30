@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% from "oncall/_banner.html" import oncall_worker_banner %}
+{% from "oncall/_nav.html" import oncall_nav %}
+{% from "oncall/_targets.html" import targets %}
+{% block content %}
+{% include "oncall/_form_error.html" %}
+{{ oncall_worker_banner(worker_banner) }}
+{{ oncall_nav('paths', current_user) }}
+<div class="page-head"><h1>{{ p.name }}</h1></div>
+{% set _role = effective_role(current_user) %}
+{% set can_manage = _role and _role.value in ("admin", "incident_commander") %}
+
+<div class="card">
+  <h3 style="margin-bottom:8px">How it escalates</h3>
+  {% if ladder %}<p>{{ ladder }}</p>{% else %}<p class="muted">No levels yet.</p>{% endif %}
+</div>
+
+{% for r in rows %}
+{% set lv = r.level %}
+<div class="card">
+  <div class="page-head" style="margin-bottom:6px">
+    <h3>Level {{ loop.index }}</h3>
+    {% if can_manage %}
+    <form method="post" action="/oncall/levels/{{ lv.id }}/move" style="display:inline">
+      <input type="hidden" name="direction" value="up">
+      <button class="btn btn-sm" type="submit" {% if loop.first %}disabled title="Already first"{% endif %}>Up</button>
+    </form>
+    <form method="post" action="/oncall/levels/{{ lv.id }}/move" style="display:inline">
+      <input type="hidden" name="direction" value="down">
+      <button class="btn btn-sm" type="submit" {% if loop.last %}disabled title="Already last"{% endif %}>Down</button>
+    </form>
+    <form method="post" action="/oncall/levels/{{ lv.id }}/delete" style="display:inline">
+      <button class="btn btn-sm" type="submit" onclick='return confirm("Delete this level?")'>Delete</button>
+    </form>
+    {% endif %}
+  </div>
+  <p>{{ r.text }}</p>
+  {% for line in r.now %}<p class="muted">Now: {{ line }}</p>{% endfor %}
+  {% if can_manage %}
+  <details{% if draft.get('kind') == 'level-edit' and draft.get('level_id') == lv.id %} open{% endif %}><summary>Edit level</summary>
+    {% set d = draft if draft.get('kind') == 'level-edit' and draft.get('level_id') == lv.id else {} %}
+    <form method="post" action="/oncall/levels/{{ lv.id }}/edit">
+      <div class="form-row">
+        {{ targets(schedules, users, d.get('schedule_ids', lv.schedule_ids), d.get('user_ids', lv.user_ids)) }}
+        <label class="field-block"><span>Wait for ack (min)</span>
+          <input name="ack_timeout_minutes" type="number" min="1" max="1440" value="{{ d.get('ack_timeout_minutes', lv.ack_timeout_minutes) }}"></label>
+      </div>
+      <button class="btn btn-sm" type="submit">Save level</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if can_manage %}
+<div class="card">
+  <h3 style="margin-bottom:10px">Add level</h3>
+  <p class="muted">Select any number of schedules or people. Checked recipients will be notified.</p>
+  {% set d = draft if draft.get('kind') == 'level-add' else {} %}
+  <form method="post" action="/oncall/escalation-paths/{{ p.id }}/levels">
+    <div class="form-row">
+      {{ targets(schedules, users, d.get('schedule_ids', []), d.get('user_ids', [])) }}
+      <label class="field-block"><span>Wait for ack (min)</span>
+        <input name="ack_timeout_minutes" type="number" min="1" max="1440" value="{{ d.get('ack_timeout_minutes', 5) }}"></label>
+    </div>
+    <button class="btn btn-primary" type="submit">Add level</button>
+  </form>
+
+  <h3 style="margin:16px 0 10px">Path settings</h3>
+  {% set d = draft if draft.get('kind') == 'path-edit' else {} %}
+  <form method="post" action="/oncall/escalation-paths/{{ p.id }}/edit">
+    <div class="form-row">
+      <label class="field-block grow"><span>Name</span><input name="name" required maxlength="120" value="{{ d.get('name', p.name) }}"></label>
+      <label class="field-block"><span>Repeat (0-10 times)</span><input name="repeat_times" type="number" min="0" max="10" value="{{ d.get('repeat_times', p.repeat_times) }}"></label>
+      <label class="field-block"><span>Team</span>
+        <select name="team_id"><option value="">—</option>
+          {% for t in teams %}<option value="{{ t.id }}" {{ 'selected' if t.id == d.get('team_id', p.team_id) }}>{{ t.name }}</option>{% endfor %}
+        </select></label>
+    </div>
+    <button class="btn btn-sm" type="submit">Save</button>
+  </form>
+  <form method="post" action="/oncall/escalation-paths/{{ p.id }}/delete" style="margin-top:10px">
+    <button class="btn btn-sm" type="submit" onclick='return confirm("Delete this path?")'>Delete path</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,3 +1,6 @@
+from datetime import date
+from urllib.parse import parse_qs, urlencode, urlsplit
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -20,6 +23,8 @@ from app.models import (
 from app.services import automation, webhooks
 from app.services import postmortems as pm_svc
 from app.services.catalog import default_severity_level_id
+from app.services.core_forms import custom_values, validation_response
+from app.services.incident_access import get_visible_incident
 from app.services.incident_types import default_incident_type_id, list_incident_types
 from app.services.incidents import (
     close_incident,
@@ -39,15 +44,24 @@ INCIDENT_TABS = ("overview", "roles", "timeline", "followups", "alerts")
 
 
 def _board_row_response(request: Request, user: User, db: Session, inc: Incident):
-    """HTMX row for the board plus an OOB refresh of the open/total counter."""
-    incidents = list_incidents(db)
+    """Refresh filtered membership through a same-origin board destination."""
+    current = urlsplit(request.headers.get("HX-Current-URL", ""))
+    if current.path == "/" and current.query:
+        query = parse_qs(current.query)
+        retained = {
+            key: query[key][0] for key in ("q", "status", "severity", "system") if key in query
+        }
+        if retained:
+            return HTMLResponse("", headers={"HX-Redirect": "/?" + urlencode(retained)})
+    incidents = list_incidents(db, user=user)
     return templates.TemplateResponse(
         request,
         "partials/incident_row_oob.html",
         {
             "current_user": user,
+            "today": date.today(),
             "i": inc,
-            "open_count": sum(1 for x in incidents if not x.is_closed),
+            "open_count": sum(1 for item in incidents if not item.is_closed),
             "total_count": len(incidents),
         },
     )
@@ -62,6 +76,19 @@ def incident_redirect(incident_id: int, return_tab: str | None = None) -> Redire
 
 @router.get("/", response_class=HTMLResponse)
 def history(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    filters = {
+        key: request.query_params.get(key, "") for key in ("q", "status", "severity", "system")
+    }
+    incidents = list_incidents(db, user=user)
+    if filters["q"]:
+        incidents = [i for i in incidents if filters["q"].casefold() in i.title.casefold()]
+    for key, attr in (
+        ("status", "status_id"),
+        ("severity", "severity_level_id"),
+        ("system", "system_id"),
+    ):
+        if filters[key]:
+            incidents = [i for i in incidents if str(getattr(i, attr)) == filters[key]]
     slack = slack_settings(db)
     slack_connections = (
         list(db.scalars(select(SlackConnection).order_by(SlackConnection.id)))
@@ -89,7 +116,8 @@ def history(request: Request, user: User = Depends(require_user), db: Session = 
         "index.html",
         {
             "current_user": user,
-            "incidents": list_incidents(db),
+            "incidents": incidents,
+            "filters": filters,
             "severity_levels": severity_levels,
             "default_severity_level_id": _initial_severity_id,
             "default_incident_type_id": _default_type_id,
@@ -107,7 +135,7 @@ def history(request: Request, user: User = Depends(require_user), db: Session = 
 @router.post("/incidents")
 async def create(
     request: Request,
-    title: str = Form(...),
+    title: str = Form(""),
     severity_level_id: int | None = Form(None),
     is_private: bool = Form(False),
     description: str | None = Form(None),
@@ -120,7 +148,11 @@ async def create(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
+    form = await request.form()
+    draft = {k: form.getlist(k) for k in form}
+    raw = {int(k[3:]): form.getlist(k) for k in form if k.startswith("cf_") and k[3:].isdigit()}
     try:
+        custom_values(db, incident_type_id or default_incident_type_id(db), raw)
         inc = create_incident(
             db,
             title=title,
@@ -136,16 +168,22 @@ async def create(
         )
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-        return RedirectResponse("/", status_code=303)
+        response = history(request, user, db)
+        from app.services.custom_fields import fields_for_type
+
+        response.context["fields"] = fields_for_type(
+            db, incident_type_id or default_incident_type_id(db)
+        )
+        response.context["draft_components"] = (
+            list(db.scalars(select(Component).where(Component.system_id == system_id)))
+            if system_id
+            else []
+        )
+        return validation_response(request, response, str(exc), draft)
     from app.services import providers
     from app.services.custom_fields import set_incident_values
 
-    form = await request.form()
-    raw = {int(k[3:]): form.getlist(k) for k in form if k.startswith("cf_") and k[3:].isdigit()}
-    missing = set_incident_values(db, inc, raw)
-    if missing:
-        request.session["flash"] = "Missing required: " + ", ".join(missing)
+    set_incident_values(db, inc, raw)
 
     vkey = providers.parse_video_choice(video)
     if vkey:
@@ -159,8 +197,8 @@ async def create(
     db.commit()
     webhooks.notify(db, inc, "opened", base_url=get_settings().base_url)
     if request.headers.get("HX-Request"):
-        return _board_row_response(request, user, db, inc)
-    return RedirectResponse("/", status_code=303)
+        return HTMLResponse("", headers={"HX-Redirect": f"/incidents/{inc.id}"})
+    return incident_redirect(inc.id)
 
 
 @router.get("/incidents/component-options", response_class=HTMLResponse)
@@ -219,14 +257,19 @@ async def edit_custom_fields(
 ):
     from app.services.custom_fields import set_incident_values
 
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     form = await request.form()
     raw = {int(k[3:]): form.getlist(k) for k in form if k.startswith("cf_") and k[3:].isdigit()}
-    missing = set_incident_values(db, inc, raw)
-    if missing:
-        request.session["flash"] = "Missing required: " + ", ".join(missing)
+    try:
+        custom_values(db, inc.incident_type_id, raw)
+    except ValueError as exc:
+        return validation_response(
+            request,
+            detail(request, incident_id, "overview", user, db),
+            str(exc),
+            {k: form.getlist(k) for k in form},
+        )
+    set_incident_values(db, inc, raw)
     db.commit()
     return incident_redirect(incident_id, return_tab)
 
@@ -239,9 +282,7 @@ def detail(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     severity_levels = list(db.scalars(select(SeverityLevel).order_by(SeverityLevel.rank)))
     systems = list(db.scalars(select(System).order_by(System.name)))
     slack = slack_settings(db)
@@ -273,11 +314,37 @@ def detail(
     active_tab = tab if tab in INCIDENT_TABS else "overview"
     if active_tab == "alerts" and not inc.alerts:
         active_tab = "overview"
+    from app.models import Escalation, EscalationStatus
+
+    active_pages = list(
+        db.scalars(
+            select(Escalation)
+            .where(
+                Escalation.incident_id == inc.id,
+                Escalation.source == "manual",
+                Escalation.status.in_(
+                    (
+                        EscalationStatus.triggered,
+                        EscalationStatus.acknowledged,
+                        EscalationStatus.exhausted,
+                    )
+                ),
+            )
+            .order_by(Escalation.created_at.desc())
+        )
+    )
+    from app.models import User as _User
+    from app.routers.oncall import _paged_info
+
+    paged_info = _paged_info(
+        db, user, active_pages, {u.id: u.name for u in db.scalars(select(_User))}
+    )
     return templates.TemplateResponse(
         request,
         "incident_detail.html",
         {
             "current_user": user,
+            "today": date.today(),
             "i": inc,
             "severity_levels": severity_levels,
             "status_levels": status_levels,
@@ -294,15 +361,17 @@ def detail(
             "custom_fields": custom_fields,
             "custom_values": custom_values,
             "active_tab": active_tab,
+            "active_pages": active_pages,
+            "paged_names": {k: v["paged"] for k, v in paged_info.items()},
         },
     )
 
 
 @router.post("/incidents/{incident_id}/edit")
-def edit(
+async def edit(
     request: Request,
     incident_id: int,
-    title: str = Form(...),
+    title: str = Form(""),
     description: str | None = Form(None),
     severity_level_id: int = Form(...),
     system_id: int | None = Form(None),
@@ -312,10 +381,11 @@ def edit(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
+    form = await request.form()
+    raw = {int(k[3:]): form.getlist(k) for k in form if k.startswith("cf_") and k[3:].isdigit()}
     try:
+        custom_values(db, incident_type_id, raw)
         update_incident(
             db,
             inc,
@@ -328,8 +398,21 @@ def edit(
         )
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-        return incident_redirect(incident_id, return_tab)
+        from app.services.custom_fields import fields_for_type
+
+        response = detail(request, incident_id, "overview", user, db)
+        response.context["edit_fields"] = fields_for_type(db, incident_type_id)
+        response.context["edit_components"] = (
+            list(db.scalars(select(Component).where(Component.system_id == system_id)))
+            if system_id
+            else []
+        )
+        return validation_response(
+            request, response, str(exc), {key: form.getlist(key) for key in form}
+        )
+    from app.services.custom_fields import set_incident_values
+
+    set_incident_values(db, inc, raw)
     if inc.slack_connection_id and inc.slack_channel_id:
         from app.services import providers
 
@@ -354,9 +437,7 @@ def add_meet(
 ):
     from app.services import providers
 
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     if inc.is_closed:
         request.session["flash"] = "Cannot add a video bridge to a closed incident."
         return incident_redirect(incident_id, return_tab)
@@ -396,9 +477,7 @@ def open_slack(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     if inc.is_closed:
         request.session["flash"] = "Cannot open a channel for a closed incident."
         return incident_redirect(incident_id, return_tab)
@@ -438,9 +517,7 @@ def close(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     if not inc.is_closed:
         close_incident(db, inc, closed_by=user.id)
         if inc.slack_connection_id:
@@ -472,9 +549,7 @@ def set_roles(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     from app.services.incidents import set_incident_role_assignees
 
     try:
@@ -507,17 +582,19 @@ def add_note_route(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     from app.services.timeline import add_note
 
     try:
         add_note(db, inc, body=body, created_by=user.id)
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-        return incident_redirect(incident_id, return_tab)
+        return validation_response(
+            request,
+            detail(request, incident_id, "timeline", user, db),
+            str(exc),
+            {"body": [body], "return_tab": [return_tab or "timeline"]},
+        )
     db.commit()
     return incident_redirect(incident_id, return_tab)
 
@@ -534,6 +611,7 @@ def pin_event_route(
     from app.models import IncidentEvent
     from app.services.timeline import toggle_pin
 
+    get_visible_incident(db, incident_id, user)
     ev = db.scalar(select(IncidentEvent).where(IncidentEvent.id == event_id))
     if ev is None or ev.incident_id != incident_id:
         return HTMLResponse("Not found", status_code=404)
@@ -554,6 +632,7 @@ def delete_event_route(
     from app.models import IncidentEvent
     from app.services.timeline import delete_note
 
+    get_visible_incident(db, incident_id, user)
     ev = db.scalar(select(IncidentEvent).where(IncidentEvent.id == event_id))
     if ev is None or ev.incident_id != incident_id:
         return HTMLResponse("Not found", status_code=404)
@@ -576,17 +655,23 @@ def post_update_route(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     from app.services.updates import post_update
 
     try:
         kind = post_update(db, inc, message=message, status_id=status_id, by_user=user.id)
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-        return incident_redirect(incident_id, return_tab)
+        return validation_response(
+            request,
+            detail(request, incident_id, return_tab, user, db),
+            str(exc),
+            {
+                "message": [message],
+                "status_id": [str(status_id or "")],
+                "return_tab": [return_tab or "overview"],
+            },
+        )
     if inc.slack_connection_id and inc.slack_channel_id:
         from app.services import providers
 
@@ -621,9 +706,7 @@ def change_status(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = db.scalar(select(Incident).where(Incident.id == incident_id))
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     try:
         kind = set_incident_status(db, inc, status_id=status_id, by_user=user.id)
     except ValueError as exc:

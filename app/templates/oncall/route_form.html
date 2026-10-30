@@ -1,0 +1,80 @@
+{# Shared route editor fields + condition-row macros. #}
+{% macro value_widget(prefix, row) %}
+{% set i = row.i %}
+{% if row.field %}
+  <select name="{{ prefix }}-{{ i }}-op" aria-label="Condition {{ i + 1 }} operator"
+          hx-get="/oncall/routes/condition-value" hx-vals='{"i": {{ i }}, "prefix": "{{ prefix }}"}' hx-include="closest .cond-row"
+          hx-target="#{{ prefix }}-{{ i }}-value" hx-swap="innerHTML" hx-trigger="change">
+    {% for o, label in row.op_labels.items() %}<option value="{{ o }}"{% if o == row.op %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  {% if row.options is not none %}
+    {% if row.options %}
+    {% if row.op == "in" %}
+    <fieldset class="dep-picker"><legend>Integrations</legend>
+      {% for v, label in row.options %}<label class="dep-opt"><input type="checkbox" name="{{ prefix }}-{{ i }}-value" value="{{ v }}"{% if v in row.selected %} checked{% endif %}><span>{{ label }}</span></label>{% endfor %}
+    </fieldset>
+    {% else %}
+    <select name="{{ prefix }}-{{ i }}-value" aria-label="Condition {{ i + 1 }} value" required>
+      {% for v, label in row.options %}<option value="{{ v }}"{% if v in row.selected %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    {% else %}<span class="muted">No integrations yet.</span>{% endif %}
+  {% else %}
+    <input name="{{ prefix }}-{{ i }}-value" aria-label="Condition {{ i + 1 }} value" required
+           value="{{ row.selected | join(', ') }}"
+           placeholder="{{ 'comma-separated, e.g. critical, high' if row.op == 'in' else 'e.g. critical' }}">
+  {% endif %}
+{% endif %}
+{% endmacro %}
+
+{% macro rows(prefix, rows, fields) %}
+{% for row in rows %}
+<div class="cond-row form-row">
+  <select name="{{ prefix }}-{{ row.i }}-field" aria-label="Condition {{ row.i + 1 }}"
+          hx-get="/oncall/routes/condition-value" hx-vals='{"i": {{ row.i }}, "prefix": "{{ prefix }}"}' hx-include="closest .cond-row"
+          hx-target="#{{ prefix }}-{{ row.i }}-value" hx-swap="innerHTML" hx-trigger="change">
+    <option value="">— no condition —</option>
+    {% for f, label in fields.items() %}<option value="{{ f }}"{% if f == row.field %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <div id="{{ prefix }}-{{ row.i }}-value" class="cond-value">{{ value_widget(prefix, row) }}</div>
+</div>
+{% endfor %}
+{% endmacro %}
+
+{% macro fields(route, paths, route_fields, cond_rows, high_rows, urgency_mode='always_high', draft={}) %}
+<div class="form-row">
+  <label class="field-block grow"><span>Name</span><input name="name" required maxlength="200" value="{{ draft.get('name', route.name if route else '') }}"></label>
+  <label class="field-block"><span>Escalation path</span>
+    <select name="escalation_path_id" required>
+      <option value="">— choose —</option>
+      {% for p in paths %}{% set n = p.levels | length %}<option value="{{ p.id }}"{% if draft.get('escalation_path_id', route.escalation_path_id if route else '') | string == p.id | string %} selected{% endif %}{% if not n and not (draft.get('escalation_path_id', route.escalation_path_id if route else '') | string == p.id | string) %} disabled{% endif %}>{{ p.name }}{% if not n %} (no levels){% endif %}</option>{% endfor %}
+    </select>
+  </label>
+</div>
+<div class="field-block"><span>Only alerts where (all must match — leave a row empty to skip it; no rows = any alert)</span>
+  {{ rows("cond", cond_rows, route_fields) }}
+</div>
+<fieldset class="field-block oc-urgency" data-urgency-form>
+  <legend><span>Urgency</span></legend>
+  <label class="check"><input type="radio" name="urgency_mode" value="always_high"{% if urgency_mode == 'always_high' %} checked{% endif %}> Always high</label>
+  <label class="check"><input type="radio" name="urgency_mode" value="always_low"{% if urgency_mode == 'always_low' %} checked{% endif %}> Always low</label>
+  <label class="check"><input type="radio" name="urgency_mode" value="high_when"{% if urgency_mode == 'high_when' %} checked{% endif %}> High only when&hellip; (otherwise low)</label>
+  <fieldset class="oc-high-rows" data-high-rows{% if urgency_mode != 'high_when' %} disabled hidden{% endif %}><legend>High urgency conditions</legend>
+    {{ rows("hi", high_rows, route_fields) }}
+  </fieldset>
+</fieldset>
+<script>
+(function () {
+  var s = document.currentScript, f = s.parentNode.querySelector("[data-urgency-form]");
+  if (!f) return;
+  var box = f.querySelector("[data-high-rows]");
+  function sync() {
+    var m = f.querySelector('input[name="urgency_mode"]:checked');
+    var active = m && m.value === "high_when";
+    box.hidden = !active;
+    box.disabled = !active;
+  }
+  f.addEventListener("change", sync); sync();
+})();
+</script>
+{% endmacro %}

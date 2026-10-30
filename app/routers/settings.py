@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -6,10 +6,49 @@ from app.auth import require_role
 from app.config import get_settings
 from app.db import get_db
 from app.models import Role, StatusLevel, User
+from app.services import settings_catalog, settings_validation
 from app.settings_store import app_settings, google_settings, sso_settings
 from app.templating import templates
 
 router = APIRouter()
+
+
+def settings_result(request, section, *, message=None, error=None, form=None, db=None, user=None):
+    if error:
+        # Recover directly from this request: large drafts never enter a cookie.
+        secret_fields = {
+            "url",
+            "secret",
+            "password",
+            "client_secret",
+            "signing_secret",
+            "service_account_json",
+            "twilio_auth_token",
+        }
+        values = (
+            {k: form.getlist(k) for k in form if k not in secret_fields} if form is not None else {}
+        )
+        # A rejected issuer can itself contain credentials or a token query.
+        if "issuer" in values:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed = urlsplit(values["issuer"][0])
+                if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                    values.pop("issuer")
+            except ValueError:
+                values.pop("issuer")
+        return render_settings(
+            request,
+            user,
+            db,
+            draft={"action": request.url.path, "values": values, "section": section},
+            error=error,
+            status_code=422,
+        )
+    if message:
+        request.session["settings_message"] = message
+    return RedirectResponse(f"/settings#{section}", status_code=303)
 
 
 @router.get("/settings", response_class=HTMLResponse)
@@ -18,6 +57,10 @@ def settings_page(
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
+    return render_settings(request, user, db)
+
+
+def render_settings(request, user, db, *, draft=None, error=None, status_code=200):
     from sqlalchemy import select
 
     from app.models import SeverityLevel, SlackConnection, Webhook
@@ -44,6 +87,9 @@ def settings_page(
     from app.models import InboundIntegration
 
     integrations = list(db.scalars(select(InboundIntegration).order_by(InboundIntegration.id)))
+    from app.settings_store import oncall_settings
+
+    oncall = oncall_settings(db)
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -56,6 +102,10 @@ def settings_page(
             "slack_configured": bool(slack.client_id and slack.client_secret),
             "slack_can_connect": bool(slack.enabled and slack.client_id and slack.client_secret),
             "slack_connections": slack_connections,
+            "oncall": oncall,
+            "twilio_configured": bool(
+                oncall.twilio_account_sid and oncall.twilio_auth_token and oncall.twilio_from_number
+            ),
             "google": google,
             "google_configured": bool(google.service_account_json and google.impersonate_email),
             "sso": sso,
@@ -69,33 +119,50 @@ def settings_page(
             "field_types": FIELD_TYPES,
             "teams": teams,
             "integrations": integrations,
+            "masked_destination": settings_validation.masked_destination,
+            "draft": draft or {},
+            "settings_error": error,
+            "settings_message": request.session.pop("settings_message", None),
         },
+        status_code=status_code,
     )
 
 
 @router.post("/settings/smtp")
-def settings_smtp(
-    host: str = Form(""),
-    port: int | None = Form(None),
-    username: str = Form(""),
-    password: str = Form(""),
-    from_address: str = Form(""),
-    use_tls: bool = Form(False),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
+async def settings_smtp(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
     from app.settings_store import smtp_settings
 
-    s = smtp_settings(db)
-    s.host = host or None
-    s.port = port
-    s.username = username or None
-    s.from_address = from_address or None
-    s.use_tls = use_tls
-    if password:  # only overwrite when a new secret is provided
-        s.password = password
-    db.commit()
-    return RedirectResponse("/settings", status_code=303)
+    form = await request.form()
+    try:
+        host = settings_catalog.text(form.get("host"), "SMTP host", 255, required=False)
+        username = settings_catalog.text(form.get("username"), "Username", 255, required=False)
+        address = settings_catalog.text(
+            form.get("from_address"), "From address", 320, required=False
+        )
+        port = settings_catalog.integer(form.get("port"), "SMTP port", optional=True)
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("SMTP port must be between 1 and 65535.")
+        if address and not settings_validation.email(address):
+            raise ValueError("Enter a valid From email address.")
+        if any(c.isspace() for c in host):
+            raise ValueError("SMTP host must not contain whitespace.")
+        s = smtp_settings(db)
+        s.host, s.username, s.from_address, s.port = (
+            host or None,
+            username or None,
+            address or None,
+            port,
+        )
+        s.use_tls = settings_catalog.checked(form.get("use_tls", ""))
+        if form.get("password"):
+            s.password = form["password"]
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "smtp", error=str(exc), form=form, db=db, user=user)
+    return settings_result(request, "smtp", message="SMTP settings saved. No email was sent.")
 
 
 @router.post("/settings/smtp/test")
@@ -120,505 +187,470 @@ def settings_smtp_test(
                 html_body="<p>SMTP is working.</p>",
             )
             request.session["flash"] = f"Test email sent to {user.email}."
-        except Exception as exc:  # noqa: BLE001 — surface the SMTP error to the admin
-            request.session["flash"] = f"Test email failed: {exc}"
-    return RedirectResponse("/settings", status_code=303)
+        except Exception:  # noqa: BLE001 — provider errors may include credentials
+            request.session["flash"] = (
+                "Test email failed. Check SMTP configuration and provider availability."
+            )
+    return settings_result(request, "smtp", message="Settings saved.")
 
 
 @router.post("/settings/app")
-def settings_app(
-    slack_channel_name_template: str = Form(...),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
+async def settings_app(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
-    s = app_settings(db)
-    s.slack_channel_name_template = slack_channel_name_template
-    db.commit()
-    return RedirectResponse("/settings", status_code=303)
+    form = await request.form()
+    try:
+        value = settings_validation.channel_template(
+            str(form.get("slack_channel_name_template", "")).strip()
+        )
+        app_settings(db).slack_channel_name_template = value
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "application", error=str(exc), form=form, db=db, user=user)
+    return settings_result(request, "application", message="Application settings saved.")
 
 
 @router.post("/settings/slack")
-def settings_slack(
-    client_id: str = Form(""),
-    client_secret: str = Form(""),
-    signing_secret: str = Form(""),
-    enabled: bool = Form(False),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
+async def settings_slack(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
     from app.settings_store import slack_settings
 
+    form = await request.form()
     s = slack_settings(db)
-    s.client_id = client_id or None
-    s.enabled = enabled
-    if client_secret:
-        s.client_secret = client_secret
-    if signing_secret:
-        s.signing_secret = signing_secret
+    try:
+        client_id = settings_catalog.text(form.get("client_id"), "Client ID", 255, required=False)
+        enabled = settings_catalog.checked(form.get("enabled", ""))
+        secret = str(form.get("client_secret", "")) or s.client_secret
+        if enabled and not (client_id and secret):
+            raise ValueError("Client ID and client secret are required to enable Slack.")
+        s.client_id, s.enabled, s.client_secret = client_id or None, enabled, secret
+        if form.get("signing_secret"):
+            s.signing_secret = form["signing_secret"]
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "slack", error=str(exc), form=form, db=db, user=user)
+    return settings_result(
+        request,
+        "slack",
+        message="Slack settings saved. Credentials have not been tested with Slack.",
+    )
+
+
+@router.post("/settings/oncall")
+async def settings_oncall(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
+):
+    from app.settings_store import oncall_settings
+
+    form = await request.form()
+    try:
+        sid = settings_catalog.text(
+            form.get("twilio_account_sid"), "Account SID", 64, required=False
+        )
+        number = settings_catalog.text(
+            form.get("twilio_from_number"), "From number", 32, required=False
+        )
+        s = oncall_settings(db)
+        s.twilio_account_sid, s.twilio_from_number = sid or None, number or None
+        if form.get("twilio_auth_token"):
+            s.twilio_auth_token = form["twilio_auth_token"]
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "oncall", error=str(exc), form=form, db=db, user=user)
+    return settings_result(
+        request, "oncall", message="On-call settings saved. No notification was sent."
+    )
+
+
+@router.post("/settings/oncall/push-keys")
+def settings_oncall_push_keys(
+    request: Request,
+    user: User = Depends(require_role(Role.admin)),
+    db: Session = Depends(get_db),
+):
+    import base64
+
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    from py_vapid import Vapid
+
+    from app.settings_store import oncall_settings
+
+    s = oncall_settings(db)
+    if s.vapid_public_key and s.vapid_private_key:
+        request.session["flash"] = "Push keys already exist."
+        return settings_result(request, "oncall", message="Settings saved.")
+    v = Vapid()
+    v.generate_keys()
+    raw_private = v.private_key.private_numbers().private_value.to_bytes(32, "big")
+    raw_public = v.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    s.vapid_private_key = base64.urlsafe_b64encode(raw_private).rstrip(b"=").decode()
+    s.vapid_public_key = base64.urlsafe_b64encode(raw_public).rstrip(b"=").decode()
     db.commit()
-    return RedirectResponse("/settings", status_code=303)
+    request.session["flash"] = "Web Push keys generated."
+    return settings_result(request, "oncall", message="Settings saved.")
 
 
 @router.post("/settings/google")
-def settings_google(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_role(Role.admin)),
-    service_account_json: str = Form(""),
-    impersonate_email: str = Form(""),
-    enabled: str = Form(""),
+async def settings_google(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
+    form = await request.form()
     g = google_settings(db)
-    g.enabled = enabled == "true"
-    g.impersonate_email = impersonate_email.strip() or None
-    if service_account_json.strip():
-        g.service_account_json = service_account_json.strip()
-    db.commit()
-    request.session["flash"] = "Google settings saved."
-    return RedirectResponse("/settings", status_code=303)
+    try:
+        key = str(form.get("service_account_json", "")).strip() or g.service_account_json
+        enabled = settings_catalog.checked(form.get("enabled", ""))
+        impersonate = settings_catalog.text(
+            form.get("impersonate_email"), "Impersonation email", 255, required=False
+        )
+        if key and (enabled or str(form.get("service_account_json", "")).strip()):
+            settings_validation.google_service_account(key)
+        if impersonate and not settings_validation.email(impersonate):
+            raise ValueError("Enter a valid impersonation email address.")
+        if enabled and (not key or not impersonate):
+            raise ValueError(
+                "A complete service-account key and impersonation email are required to enable Google."
+            )
+        g.service_account_json, g.impersonate_email, g.enabled = key, impersonate or None, enabled
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "google", error=str(exc), form=form, db=db, user=user)
+    return settings_result(
+        request,
+        "google",
+        message="Google settings saved. Structure validated locally; provider access has not been tested.",
+    )
 
 
 @router.post("/settings/sso")
-def settings_sso(
-    sso_enabled: bool = Form(False),
-    allow_local_login: bool = Form(False),
-    allowed_domains: str = Form(""),
-    issuer: str = Form(""),
-    client_id: str = Form(""),
-    client_secret: str = Form(""),
-    display_name: str = Form(""),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
+async def settings_sso(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
+    form = await request.form()
     s = sso_settings(db)
-    s.sso_enabled = sso_enabled
-    s.allow_local_login = allow_local_login
-    s.allowed_domains = allowed_domains or None
-    s.issuer = issuer or None
-    s.client_id = client_id or None
-    s.display_name = display_name or None
-    if client_secret:
-        s.client_secret = client_secret
-    db.commit()
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/severity")
-def settings_severity_create(
-    request: Request,
-    label: str = Form(...),
-    color: str = Form(...),
-    rank: int = Form(100),
-    is_default: bool = Form(False),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.catalog import create_severity_level
-
     try:
-        create_severity_level(db, label=label, color=color, rank=rank, is_default=is_default)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+        enabled = settings_catalog.checked(form.get("sso_enabled", ""))
+        issuer = settings_catalog.text(form.get("issuer"), "Issuer URL", 512, required=False)
+        client_id = settings_catalog.text(form.get("client_id"), "Client ID", 255, required=False)
+        secret = str(form.get("client_secret", "")) or s.client_secret
+        if issuer:
+            settings_validation.http_url(issuer)
+            from urllib.parse import urlsplit
 
-
-@router.post("/settings/severity/{level_id}/delete")
-def settings_severity_delete(
-    request: Request,
-    level_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.catalog import delete_severity_level
-
-    try:
-        delete_severity_level(db, level_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/severity/{level_id}/default")
-def settings_severity_default(
-    request: Request,
-    level_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.catalog import set_default_severity_level
-
-    try:
-        set_default_severity_level(db, level_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/statuses")
-def settings_statuses_create(
-    request: Request,
-    label: str = Form(...),
-    category: str = Form(...),
-    rank: int = Form(100),
-    is_default: bool = Form(False),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.statuses import create_status_level
-
-    try:
-        create_status_level(db, label=label, category=category, rank=rank, is_default=is_default)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/statuses/{level_id}/delete")
-def settings_statuses_delete(
-    request: Request,
-    level_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.statuses import delete_status_level
-
-    try:
-        delete_status_level(db, level_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/statuses/{level_id}/default")
-def settings_statuses_default(
-    request: Request,
-    level_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.statuses import set_default_status_level
-
-    try:
-        set_default_status_level(db, level_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/incident-types")
-def settings_incident_types_create(
-    request: Request,
-    label: str = Form(...),
-    description: str | None = Form(None),
-    rank: int = Form(100),
-    is_default: bool = Form(False),
-    default_severity_level_id: int | None = Form(None),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.incident_types import create_incident_type
-
-    try:
-        create_incident_type(
-            db,
-            label=label,
-            description=description,
-            rank=rank,
-            is_default=is_default,
-            default_severity_level_id=default_severity_level_id,
+            parsed = urlsplit(issuer)
+            if parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError(
+                    "Issuer must not contain credentials, query parameters or a fragment."
+                )
+        if enabled and not (issuer and client_id and secret):
+            raise ValueError("Issuer URL, client ID and client secret are required to enable SSO.")
+        domains = settings_catalog.text(
+            form.get("allowed_domains"), "Allowed domains", 1000, required=False
         )
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/incident-types/{type_id}/delete")
-def settings_incident_types_delete(
-    request: Request,
-    type_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.incident_types import delete_incident_type
-
-    try:
-        delete_incident_type(db, type_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/incident-types/{type_id}/default")
-def settings_incident_types_default(
-    request: Request,
-    type_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.incident_types import set_default_incident_type
-
-    try:
-        set_default_incident_type(db, type_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/custom-fields")
-def settings_custom_fields_create(
-    request: Request,
-    label: str = Form(...),
-    field_type: str = Form(...),
-    options: str | None = Form(None),
-    required: bool = Form(False),
-    rank: int = Form(100),
-    incident_type_ids: list[int] = Form(default=[]),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.custom_fields import create_field_def
-
-    try:
-        create_field_def(
-            db,
-            label=label,
-            field_type=field_type,
-            options=options,
-            required=required,
-            rank=rank,
-            incident_type_ids=incident_type_ids,
+        if any(
+            not settings_validation.email("user@" + domain.strip())
+            for domain in domains.split(",")
+            if domain.strip()
+        ):
+            raise ValueError("Enter valid comma-separated domain names.")
+        display = settings_catalog.text(
+            form.get("display_name"), "Button label", 120, required=False
         )
+        s.sso_enabled, s.issuer, s.client_id, s.client_secret = (
+            enabled,
+            issuer or None,
+            client_id or None,
+            secret,
+        )
+        s.allow_local_login = settings_catalog.checked(form.get("allow_local_login", ""))
+        s.allowed_domains, s.display_name = domains or None, display or None
         db.commit()
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+        return settings_result(request, "sso", error=str(exc), form=form, db=db, user=user)
+    return settings_result(
+        request,
+        "sso",
+        message="SSO settings saved. Protected admin password login remains available.",
+    )
 
 
-@router.post("/settings/custom-fields/{field_id}/delete")
-def settings_custom_fields_delete(
-    request: Request,
-    field_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.custom_fields import delete_field_def
-
+# Explicit allowlisted catalog paths preserve existing URLs and IDs.
+async def catalog_save(request, kind, db, user, *, record_id=None):
+    form = await request.form()
     try:
-        delete_field_def(db, field_id)
+        settings_catalog.save(db, kind, form, record_id=record_id)
         db.commit()
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+        return settings_result(request, kind, error=str(exc), form=form, db=db, user=user)
+    return settings_result(request, kind, message="Changes saved.")
 
 
-@router.post("/settings/roles")
-def settings_role_create(
-    request: Request,
-    label: str = Form(...),
-    rank: int = Form(100),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.roles import create_incident_role_type
+def register_catalog(kind):
+    async def create(
+        request: Request,
+        user: User = Depends(require_role(Role.admin)),
+        db: Session = Depends(get_db),
+    ):
+        return await catalog_save(request, kind, db, user)
 
-    try:
-        create_incident_role_type(db, label=label, rank=rank)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+    async def edit(
+        record_id: int,
+        request: Request,
+        user: User = Depends(require_role(Role.admin)),
+        db: Session = Depends(get_db),
+    ):
+        return await catalog_save(request, kind, db, user, record_id=record_id)
+
+    def delete(
+        record_id: int,
+        request: Request,
+        user: User = Depends(require_role(Role.admin)),
+        db: Session = Depends(get_db),
+    ):
+        try:
+            settings_catalog.delete(db, kind, record_id)
+            db.commit()
+        except ValueError as exc:
+            db.rollback()
+            return settings_result(request, kind, error=str(exc), db=db, user=user)
+        return settings_result(request, kind, message="Record deleted.")
+
+    def make_default(
+        record_id: int,
+        request: Request,
+        user: User = Depends(require_role(Role.admin)),
+        db: Session = Depends(get_db),
+    ):
+        try:
+            settings_catalog.make_default(db, kind, record_id)
+            db.commit()
+        except ValueError as exc:
+            db.rollback()
+            return settings_result(request, kind, error=str(exc), db=db, user=user)
+        return settings_result(request, kind, message="Default updated.")
+
+    router.add_api_route(
+        f"/settings/{kind}", create, methods=["POST"], name=f"settings_{kind}_create"
+    )
+    router.add_api_route(
+        f"/settings/{kind}/{{record_id}}/edit", edit, methods=["POST"], name=f"settings_{kind}_edit"
+    )
+    router.add_api_route(
+        f"/settings/{kind}/{{record_id}}/delete",
+        delete,
+        methods=["POST"],
+        name=f"settings_{kind}_delete",
+    )
+    if kind in ("severity", "statuses", "incident-types"):
+        router.add_api_route(
+            f"/settings/{kind}/{{record_id}}/default",
+            make_default,
+            methods=["POST"],
+            name=f"settings_{kind}_default",
+        )
 
 
-@router.post("/settings/roles/{role_type_id}/delete")
-def settings_role_delete(
-    request: Request,
-    role_type_id: int,
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.roles import delete_incident_role_type
-
-    try:
-        delete_incident_role_type(db, role_type_id)
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+for _kind in settings_catalog.MODELS:
+    register_catalog(_kind)
 
 
 @router.post("/settings/webhooks")
-def settings_webhook_create(
+@router.post("/settings/webhooks/{webhook_id}/edit")
+async def settings_webhook_save(
     request: Request,
-    name: str = Form(...),
-    url: str = Form(...),
-    format: str = Form("generic"),
-    secret: str | None = Form(None),
+    webhook_id: int | None = None,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
     from app.models import Webhook, WebhookFormat
 
-    name, url = name.strip(), url.strip()
-    if not name or not url:
-        request.session["flash"] = "Webhook needs a name and a URL."
-        return RedirectResponse("/settings", status_code=303)
+    form = await request.form()
+    hook = db.get(Webhook, webhook_id) if webhook_id is not None else None
+    if webhook_id is not None and hook is None:
+        return HTMLResponse("Webhook not found", status_code=404)
     try:
-        fmt = WebhookFormat(format)
-    except ValueError:
-        request.session["flash"] = "Unknown webhook format."
-        return RedirectResponse("/settings", status_code=303)
-    db.add(
-        Webhook(
-            name=name,
-            url=url,
-            format=fmt,
-            secret=(secret or "").strip() or None,
-            created_by=user.id,
-        )
-    )
-    db.commit()
-    return RedirectResponse("/settings", status_code=303)
+        name = settings_catalog.text(form.get("name"), "Webhook name", 120)
+        url = str(form.get("url", "")).strip() or (hook.url if hook else "")
+        settings_validation.http_url(url)
+        try:
+            fmt = WebhookFormat(form.get("format", "generic"))
+        except ValueError:
+            raise ValueError("Choose a valid webhook format.") from None
+        if hook is None:
+            hook = Webhook(name=name, url=url, format=fmt, created_by=user.id)
+            db.add(hook)
+        else:
+            hook.name, hook.url, hook.format = name, url, fmt
+        secret = str(form.get("secret", "")).strip()
+        if len(secret) > 4096:
+            raise ValueError("Signing secret must be 4096 characters or fewer.")
+        if secret:
+            hook.secret = secret
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "webhooks", error=str(exc), form=form, db=db, user=user)
+    return settings_result(request, "webhooks", message="Webhook saved. No request was sent.")
 
 
-@router.post("/settings/webhooks/{webhook_id}/delete")
-def settings_webhook_delete(
+@router.post("/settings/webhooks/{webhook_id}/toggle")
+def settings_webhook_toggle(
     webhook_id: int,
+    request: Request,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
     from app.models import Webhook
 
-    w = db.get(Webhook, webhook_id)
-    if w:
-        db.delete(w)
-        db.commit()
-    return RedirectResponse("/settings", status_code=303)
-
-
-@router.post("/settings/teams")
-def settings_team_create(
-    request: Request,
-    name: str = Form(...),
-    description: str | None = Form(None),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
-):
-    from app.services.teams import create_team
-
+    hook = db.get(Webhook, webhook_id)
+    if hook is None:
+        return HTMLResponse("Webhook not found", status_code=404)
     try:
-        create_team(db, name=name, description=description)
+        if not hook.enabled:
+            settings_validation.http_url(hook.url)
+        hook.enabled = not hook.enabled
         db.commit()
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+        return settings_result(request, "webhooks", error=str(exc), db=db, user=user)
+    return settings_result(
+        request, "webhooks", message="Webhook enabled." if hook.enabled else "Webhook disabled."
+    )
 
 
-@router.post("/settings/teams/{team_id}/delete")
-def settings_team_delete(
+@router.post("/settings/webhooks/{webhook_id}/preview")
+def settings_webhook_preview(
+    webhook_id: int,
     request: Request,
-    team_id: int,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
-    from app.services.teams import delete_team
+    import json
+    from types import SimpleNamespace
 
-    try:
-        delete_team(db, team_id)
+    from app.models import StatusCategory, Webhook
+    from app.services.webhooks import build_payload
+
+    hook = db.get(Webhook, webhook_id)
+    if hook is None:
+        return HTMLResponse("Webhook not found", status_code=404)
+    sample = SimpleNamespace(
+        id=0,
+        title="Sample incident (synthetic)",
+        severity_level=SimpleNamespace(label="SEV2"),
+        status=SimpleNamespace(label="Investigating", category=StatusCategory.active),
+    )
+    payload = build_payload(
+        hook.format, text="Sample incident opened", incident=sample, event="opened", url=None
+    )
+    return templates.TemplateResponse(
+        request,
+        "webhook_preview.html",
+        {
+            "current_user": user,
+            "hook": hook,
+            "destination": settings_validation.masked_destination(hook.url),
+            "payload": json.dumps(payload, indent=2),
+        },
+    )
+
+
+@router.post("/settings/webhooks/{webhook_id}/delete")
+def settings_webhook_delete(
+    webhook_id: int,
+    request: Request,
+    user: User = Depends(require_role(Role.admin)),
+    db: Session = Depends(get_db),
+):
+    from app.models import Webhook
+
+    hook = db.get(Webhook, webhook_id)
+    if hook:
+        db.delete(hook)
         db.commit()
-    except ValueError as exc:
-        db.rollback()
-        request.session["flash"] = str(exc)
-    return RedirectResponse("/settings", status_code=303)
+    return settings_result(
+        request,
+        "webhooks",
+        message="Webhook deleted. Future events will no longer be delivered to it.",
+    )
 
 
 @router.post("/settings/integrations")
-def settings_integrations_create(
-    request: Request,
-    name: str = Form(...),
-    kind: str = Form(...),
-    user: User = Depends(require_role(Role.admin)),
-    db: Session = Depends(get_db),
+async def settings_integrations_create(
+    request: Request, user: User = Depends(require_role(Role.admin)), db: Session = Depends(get_db)
 ):
     import secrets
 
     from app.models import InboundIntegration
 
-    if kind not in ("sns", "alertmanager", "generic"):
-        request.session["flash"] = "Unknown integration kind."
-        return RedirectResponse("/settings", status_code=303)
-    db.add(InboundIntegration(name=name, kind=kind, token=secrets.token_urlsafe(32)))
-    db.commit()
-    return RedirectResponse("/settings", status_code=303)
+    form = await request.form()
+    try:
+        name = settings_catalog.text(form.get("name"), "Integration name", 120)
+        kind = str(form.get("kind", ""))
+        if kind not in ("sns", "alertmanager", "generic"):
+            raise ValueError("Choose a valid integration kind.")
+        db.add(InboundIntegration(name=name, kind=kind, token=secrets.token_urlsafe(32)))
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "integrations", error=str(exc), form=form, db=db, user=user)
+    return settings_result(request, "integrations", message="Inbound integration created.")
 
 
 GENERIC_MAPPING_KEYS = ("dedup_key", "title", "status", "severity", "resolved_value")
 
 
 @router.post("/settings/integrations/{integration_id}/settings")
-def settings_integrations_mapping(
+async def settings_integrations_mapping(
     request: Request,
     integration_id: int,
-    dedup_key: str = Form(...),
-    title: str = Form(""),
-    status: str = Form(""),
-    severity: str = Form(""),
-    resolved_value: str = Form(""),
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
 ):
-    """Save the dotted JSON paths the generic mapper (parse_generic) reads."""
-    from sqlalchemy import select
-
+    """Save only the fixed generic parser mapping keys."""
     from app.models import InboundIntegration
 
-    integ = db.scalar(select(InboundIntegration).where(InboundIntegration.id == integration_id))
-    if integ is None:
-        return HTMLResponse("Not found", status_code=404)
-    if integ.kind != "generic":
-        request.session["flash"] = "Only Generic JSON integrations have a field mapping."
-        return RedirectResponse("/settings", status_code=303)
-    values = {
-        "dedup_key": dedup_key,
-        "title": title,
-        "status": status,
-        "severity": severity,
-        "resolved_value": resolved_value,
-    }
-    mapping = {k: v.strip() for k, v in values.items() if v and v.strip()}
-    if "dedup_key" not in mapping:
-        request.session["flash"] = "The dedup key path is required."
-        return RedirectResponse("/settings", status_code=303)
-    kept = {k: v for k, v in (integ.settings or {}).items() if k not in GENERIC_MAPPING_KEYS}
-    integ.settings = {**kept, **mapping}  # new dict so the JSONB change is tracked
-    db.commit()
-    return RedirectResponse("/settings", status_code=303)
+    integration = db.get(InboundIntegration, integration_id)
+    if integration is None:
+        return HTMLResponse("Integration not found", status_code=404)
+    form = await request.form()
+    try:
+        if integration.kind != "generic":
+            raise ValueError("Only Generic JSON integrations have a field mapping.")
+        mapping = {
+            k: settings_catalog.text(
+                form.get(k), k.replace("_", " ").title(), 500, required=k == "dedup_key"
+            )
+            for k in GENERIC_MAPPING_KEYS
+        }
+        mapping = {k: v for k, v in mapping.items() if v}
+        for k, value in mapping.items():
+            if k != "resolved_value" and (
+                any(c.isspace() for c in value) or any(not part for part in value.split("."))
+            ):
+                raise ValueError(
+                    "Mapping paths must contain nonempty dot-separated keys without whitespace."
+                )
+        kept = {
+            k: v for k, v in (integration.settings or {}).items() if k not in GENERIC_MAPPING_KEYS
+        }
+        integration.settings = {**kept, **mapping}
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return settings_result(request, "integrations", error=str(exc), form=form, db=db, user=user)
+    return settings_result(request, "integrations", message="Inbound field mapping saved.")
 
 
 @router.post("/settings/integrations/{integration_id}/delete")
 def settings_integrations_delete(
+    request: Request,
     integration_id: int,
     user: User = Depends(require_role(Role.admin)),
     db: Session = Depends(get_db),
@@ -631,4 +663,4 @@ def settings_integrations_delete(
     if integ is not None:
         db.delete(integ)
         db.commit()
-    return RedirectResponse("/settings", status_code=303)
+    return settings_result(request, "integrations", message="Settings saved.")

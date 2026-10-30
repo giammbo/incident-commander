@@ -29,6 +29,9 @@ def test_non_admin_cannot_list(client, db_session):
 
 def test_admin_creates_rule(client, db_session):
     _login(client, db_session, Role.admin)
+    severity = SeverityLevel(label="P1", color="#123456")
+    db_session.add(severity)
+    db_session.commit()
     r = client.post(
         "/automations",
         headers={"origin": "http://testserver"},
@@ -38,7 +41,7 @@ def test_admin_creates_rule(client, db_session):
             "trigger": "incident.opened",
             "cond_field": ["severity"],
             "cond_op": ["equals"],
-            "cond_value": ["1"],
+            "cond_value": [str(severity.id)],
             "action_type": "create_followup",
             "ap_title": "x",
         },
@@ -46,7 +49,7 @@ def test_admin_creates_rule(client, db_session):
     assert r.status_code == 303
     rule = db_session.scalar(select(WorkflowRule).where(WorkflowRule.name == "r1"))
     assert rule is not None and rule.trigger == "incident.opened"
-    assert rule.conditions == [{"field": "severity", "op": "equals", "value": 1}]
+    assert rule.conditions == [{"field": "severity", "op": "equals", "value": severity.id}]
     assert rule.actions == [
         {"type": "create_followup", "params": {"title": "x", "assignee_id": None}}
     ]
@@ -67,7 +70,7 @@ def test_invalid_action_for_trigger_rejected(client, db_session):
             "ap_private": "false",
         },
     )
-    assert r.status_code == 303
+    assert r.status_code == 422
     assert db_session.scalar(select(WorkflowRule).where(WorkflowRule.name == "bad")) is None
 
 
@@ -179,3 +182,53 @@ def test_builder_and_value_partials_require_admin(client, db_session):
         "/automations/condition-value?i=0&cond-0-field=severity",
     ):
         assert client.get(url, follow_redirects=False).status_code == 403
+
+
+@pytest.mark.parametrize("editing", [False, True])
+def test_followup_title_301_rejected_with_bound_draft(client, db_session, editing):
+    _login(client, db_session, Role.admin)
+    rule = WorkflowRule(
+        name="Original",
+        trigger="incident.opened",
+        conditions=[],
+        actions=[{"type": "create_followup", "params": {"title": "Original action"}}],
+    )
+    db_session.add(rule)
+    db_session.commit()
+    original_id = rule.id
+    url = f"/automations/{rule.id}/edit" if editing else "/automations"
+    title = "x" * 301
+    r = client.post(
+        url,
+        data={
+            "name": "Retained draft",
+            "trigger": "incident.opened",
+            "action_type": "create_followup",
+            "ap_title": title,
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 422
+    assert "300" in r.text and title in r.text and "Retained draft" in r.text
+    db_session.expire_all()
+    rules = db_session.scalars(select(WorkflowRule)).all()
+    assert len(rules) == 1
+    assert rules[0].id == original_id and rules[0].name == "Original"
+    assert rules[0].actions[0]["params"]["title"] == "Original action"
+
+
+def test_cannot_reenable_legacy_followup_with_301_character_title(client, db_session):
+    _login(client, db_session, Role.admin)
+    rule = WorkflowRule(
+        name="Legacy",
+        trigger="incident.opened",
+        conditions=[],
+        enabled=False,
+        actions=[{"type": "create_followup", "params": {"title": "x" * 301}}],
+    )
+    db_session.add(rule)
+    db_session.commit()
+    r = client.post(f"/automations/{rule.id}/toggle", follow_redirects=True)
+    assert r.status_code == 200 and "300" in r.text
+    db_session.refresh(rule)
+    assert not rule.enabled

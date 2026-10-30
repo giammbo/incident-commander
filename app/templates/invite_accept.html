@@ -4,12 +4,13 @@
   <form class="auth-card" method="post" action="/invite/accept">
     <div class="mark">Incident Commander</div>
     <h1>Set your password</h1>
-    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
     {% if valid %}
       <input type="hidden" name="token" value="{{ token }}">
-      <label class="field"><span>New password</span><input type="password" name="new_password" required autofocus></label>
-      <label class="field"><span>Confirm</span><input type="password" name="confirm" required></label>
-      <button class="btn btn-primary" type="submit">Activate account</button>
+      <p id="password-help" class="muted">Use at least 8 characters. Enter the same password in both fields.</p>
+      <label class="field"><span>New password</span><input type="password" name="new_password" minlength="8" autocomplete="new-password" aria-describedby="password-help" required autofocus></label>
+      <label class="field"><span>Confirm password</span><input type="password" name="confirm" minlength="8" autocomplete="new-password" required></label>
+      <button class="btn btn-primary" type="submit">Set password and activate account</button>
     {% else %}
       <p class="muted">Ask an administrator for a new invitation.</p>
       <a class="btn" href="/login">Back to sign in</a>

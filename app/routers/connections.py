@@ -13,7 +13,14 @@ from app.services.slack import authorize_url, exchange_code
 from app.settings_store import slack_settings
 
 router = APIRouter()
-SLACK_SCOPES = ["channels:manage", "groups:write", "chat:write"]
+SLACK_SCOPES = [
+    "channels:manage",
+    "groups:write",
+    "chat:write",
+    "im:write",
+    "users:read",
+    "users:read.email",
+]
 
 
 @router.get("/connections")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -14,7 +15,7 @@ from app.db import get_db
 from app.models import Alert, InboundIntegration
 from app.services import alert_adapters as adapters
 from app.services import alerts as alerts_service
-from app.services import automation, webhooks
+from app.services import automation, oncall_routes, webhooks
 
 router = APIRouter()
 
@@ -67,6 +68,7 @@ async def ingest(token: str, request: Request, db: Session = Depends(get_db)):
         alert = alerts_service.ingest_alert(db, integ, n)
         if alert.status == "firing" and prior_status in (None, "resolved"):
             created += automation.run_rules(db, trigger="alert.received", alert=alert, by_user=None)
+            oncall_routes.safe_page_for_alert(db, alert, now=datetime.now(UTC))
     db.commit()
     # "opened" webhook for incidents auto-created by alert rules, after the commit
     # (as POST /incidents does); notify is best-effort, so ingest never 500s on it.

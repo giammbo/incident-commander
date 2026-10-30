@@ -1,19 +1,16 @@
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_role, require_user
 from app.db import get_db
-from app.models import Incident, Role, User
+from app.models import Role, User
 from app.services import postmortems as pm_svc
+from app.services.core_forms import validation_response
+from app.services.incident_access import get_visible_incident
 from app.templating import templates
 
 router = APIRouter()
-
-
-def _incident(db, incident_id):
-    return db.scalar(select(Incident).where(Incident.id == incident_id))
 
 
 @router.get("/postmortems", response_class=HTMLResponse)
@@ -23,8 +20,8 @@ def index(request: Request, user: User = Depends(require_user), db: Session = De
         "postmortems_index.html",
         {
             "current_user": user,
-            "incidents": pm_svc.list_incidents_with_postmortem(db),
-            "to_write": pm_svc.list_closed_incidents_without_postmortem(db),
+            "incidents": pm_svc.list_incidents_with_postmortem(db, user=user),
+            "to_write": pm_svc.list_closed_incidents_without_postmortem(db, user=user),
         },
     )
 
@@ -36,9 +33,7 @@ def generate(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = _incident(db, incident_id)
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     pm_svc.generate(db, inc, by_user=user.id)
     db.commit()
     return RedirectResponse(f"/incidents/{incident_id}/postmortem", status_code=303)
@@ -51,9 +46,7 @@ def view(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    inc = _incident(db, incident_id)
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     try:
         # Commit unconditionally: maybe_pull writes a throttle timestamp even when the
         # fetch fails/returns nothing, and it MUST persist (get_db has no commit-on-teardown,
@@ -74,13 +67,11 @@ def view(
 def save(
     request: Request,
     incident_id: int,
-    body: str = Form(...),
+    body: str = Form(""),
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = _incident(db, incident_id)
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     pm = pm_svc.get_postmortem(db, inc)
     if pm is None:
         request.session["flash"] = "Generate the postmortem first."
@@ -90,7 +81,10 @@ def save(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        request.session["flash"] = str(exc)
+        response = templates.TemplateResponse(
+            request, "postmortem.html", {"current_user": user, "i": inc, "postmortem": pm}
+        )
+        return validation_response(request, response, str(exc), {"body": [body]})
     return RedirectResponse(f"/incidents/{incident_id}/postmortem", status_code=303)
 
 
@@ -101,9 +95,7 @@ def regenerate(
     user: User = Depends(require_role(Role.incident_commander)),
     db: Session = Depends(get_db),
 ):
-    inc = _incident(db, incident_id)
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     pm = pm_svc.get_postmortem(db, inc)
     if pm is not None:
         pm_svc.regenerate(db, pm, inc, by_user=user.id)
@@ -118,9 +110,7 @@ def download(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    inc = _incident(db, incident_id)
-    if inc is None:
-        return HTMLResponse("Not found", status_code=404)
+    inc = get_visible_incident(db, incident_id, user)
     pm = pm_svc.get_postmortem(db, inc)
     if pm is None:
         return HTMLResponse("Not found", status_code=404)

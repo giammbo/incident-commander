@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ 'Edit automation' if rule else 'New automation' }}</h1></div>
+<p class="page-sub">Saving changes preserves this rule's identity. Actions only run on a matching future event.</p>
+{% if error %}<div class="card" role="alert" tabindex="-1" id="automation-error">{{ error }} Your inputs have been kept.</div>{% endif %}
+<div class="card">
+  {% if rule and rule.actions|length > 1 %}<p>Edit one action at a time. Other actions are kept.</p><nav class="row" aria-label="Rule actions">{% for a in rule.actions %}<a class="btn btn-sm" href="/automations/{{ rule.id }}/edit?action_index={{ loop.index0 }}">Action {{ loop.index }}: {{ a.type|replace('_',' ') }}</a>{% endfor %}</nav>{% endif %}
+  <form method="post" action="{{ '/automations/' ~ rule.id ~ '/edit' if rule else '/automations' }}" class="rule-editor">
+    <input type="hidden" name="action_index" value="{{ action_index or 0 }}">
+    <div class="form-row">
+      <label class="field-block grow"><span>Rule name</span><input name="name" value="{{ name if name is defined else rule.name if rule else '' }}" maxlength="200" required></label>
+      <label class="field-block"><span>Trigger</span><select name="trigger" hx-get="/automations/builder" hx-target="#rule-builder" hx-swap="innerHTML" hx-trigger="change" hx-include="this">{% for t, label in trigger_labels.items() %}<option value="{{ t }}" {{ 'selected' if t == trigger else '' }}>{{ label }}</option>{% endfor %}</select></label>
+    </div>
+    <p class="muted">Changing the trigger refreshes the available conditions and action. Save validates the complete rule before enabling it.</p>
+    <div id="rule-builder">{% include "partials/automation_builder.html" %}</div>
+    <button class="btn btn-primary" type="submit">Save rule</button>
+    <a class="btn" href="/automations">Cancel</a>
+  </form>
+</div>
+{% if raw_draft is defined %}
+<script type="application/json" id="automation-draft">{{ raw_draft|tojson }}</script>
+<script>
+(() => {
+ const data = JSON.parse(document.getElementById('automation-draft').textContent);
+ const form = document.querySelector('.rule-editor');
+ // Condition widgets are already bound by the server; only action fields use this draft.
+ form.querySelectorAll('input[type=checkbox]:not([name^="cond-"])').forEach(el => el.checked = false);
+ for (const [name, values] of Object.entries(data)) Array.from(form.elements).filter(el => el.name === name).forEach(el => {
+   if (el.type === 'checkbox') el.checked = values.includes(el.value);
+   else if (el.multiple) Array.from(el.options).forEach(o => o.selected = values.includes(o.value));
+   else el.value = values[0] || '';
+ });
+ document.getElementById('automation-error')?.focus();
+})();
+</script>
+{% endif %}
+{% endblock %}

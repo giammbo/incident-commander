@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import CustomFieldDef, IncidentCustomFieldValue, IncidentType
@@ -12,6 +12,49 @@ FIELD_TYPES = ("text", "textarea", "select", "multi_select", "number", "checkbox
 
 def list_field_defs(db: Session) -> list[CustomFieldDef]:
     return list(db.scalars(select(CustomFieldDef).order_by(CustomFieldDef.rank, CustomFieldDef.id)))
+
+
+def _validate_definition(db, *, label, field_type, options, rank, incident_type_ids, fd=None):
+    label = (label or "").strip()
+    if not label or len(label) > 80:
+        raise ValueError("Field label is required and must be 80 characters or fewer")
+    if field_type not in FIELD_TYPES:
+        raise ValueError("Invalid field type")
+    if not isinstance(rank, int) or not 0 <= rank <= 2147483647:
+        raise ValueError("Rank must be a positive whole number")
+    clash = select(CustomFieldDef).where(func.lower(CustomFieldDef.label) == label.lower())
+    if fd is not None:
+        clash = clash.where(CustomFieldDef.id != fd.id)
+    if db.scalar(clash):
+        raise ValueError("A field with this label already exists")
+    choices = [o.strip() for o in (options or "").splitlines() if o.strip()]
+    if field_type in ("select", "multi_select"):
+        if not choices or len(choices) != len(set(choices)):
+            raise ValueError("Select fields need at least one option, with no duplicates")
+    ids = set(incident_type_ids or [])
+    if ids and set(db.scalars(select(IncidentType.id).where(IncidentType.id.in_(ids)))) != ids:
+        raise ValueError("Choose existing incident types")
+    if fd is not None:
+        used = list(
+            db.scalars(
+                select(IncidentCustomFieldValue).where(IncidentCustomFieldValue.field_id == fd.id)
+            )
+        )
+        if used and field_type != fd.field_type:
+            raise ValueError(
+                "This field is in use; its type cannot change. Existing values are preserved."
+            )
+        if used and field_type in ("select", "multi_select"):
+            for value in used:
+                try:
+                    selected = (
+                        json.loads(value.value) if field_type == "multi_select" else [value.value]
+                    )
+                except ValueError:
+                    selected = [value.value]
+                if not isinstance(selected, list) or any(v not in choices for v in selected):
+                    raise ValueError("This option is in use; keep it to preserve existing values.")
+    return label, "\n".join(choices) if field_type in ("select", "multi_select") else None
 
 
 def _apply_types(db, fd, incident_type_ids):
@@ -24,13 +67,14 @@ def _apply_types(db, fd, incident_type_ids):
 def create_field_def(
     db, *, label, field_type, options=None, required=False, rank=100, incident_type_ids=None
 ) -> CustomFieldDef:
-    label = label.strip()
-    if not label:
-        raise ValueError("Field label is required")
-    if field_type not in FIELD_TYPES:
-        raise ValueError("Invalid field type")
-    if db.scalar(select(CustomFieldDef).where(CustomFieldDef.label == label)):
-        raise ValueError(f"A field '{label}' already exists")
+    label, options = _validate_definition(
+        db,
+        label=label,
+        field_type=field_type,
+        options=options,
+        rank=rank,
+        incident_type_ids=incident_type_ids,
+    )
     fd = CustomFieldDef(
         label=label, field_type=field_type, options=options, required=required, rank=rank
     )
@@ -42,16 +86,15 @@ def create_field_def(
 
 
 def update_field_def(db, fd, *, label, field_type, options, required, rank, incident_type_ids):
-    label = label.strip()
-    if not label:
-        raise ValueError("Field label is required")
-    if field_type not in FIELD_TYPES:
-        raise ValueError("Invalid field type")
-    clash = db.scalar(
-        select(CustomFieldDef).where(CustomFieldDef.label == label, CustomFieldDef.id != fd.id)
+    label, options = _validate_definition(
+        db,
+        label=label,
+        field_type=field_type,
+        options=options,
+        rank=rank,
+        incident_type_ids=incident_type_ids,
+        fd=fd,
     )
-    if clash:
-        raise ValueError(f"A field '{label}' already exists")
     fd.label, fd.field_type, fd.options, fd.required, fd.rank = (
         label,
         field_type,

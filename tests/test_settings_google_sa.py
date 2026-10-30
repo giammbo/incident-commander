@@ -5,6 +5,7 @@ from app.db import get_db
 from app.main import create_app
 from app.services.users import bootstrap_admin
 from app.settings_store import google_settings
+from tests.settings_fixtures import service_account_json
 
 
 @pytest.fixture
@@ -18,7 +19,10 @@ def _admin(client, db_session):
     _, pw = bootstrap_admin(db_session, "admin@localhost")
     db_session.flush()
     client.post("/login", data={"email": "admin@localhost", "password": pw})
-    client.post("/account/password", data={"new_password": "Admin-123", "confirm": "Admin-123"})
+    client.post(
+        "/account/password",
+        data={"new_password": "Admin-123", "confirm": "Admin-123", "name": "Admin"},
+    )
 
 
 def test_settings_google_saves_sa(client, db_session):
@@ -26,7 +30,7 @@ def test_settings_google_saves_sa(client, db_session):
     r = client.post(
         "/settings/google",
         data={
-            "service_account_json": '{"type":"service_account","client_email":"x@y.iam"}',
+            "service_account_json": service_account_json(),
             "impersonate_email": "bot@example.com",
             "enabled": "true",
         },
@@ -44,7 +48,7 @@ def test_settings_google_blank_json_keeps_current(client, db_session):
     client.post(
         "/settings/google",
         data={
-            "service_account_json": '{"type":"service_account"}',
+            "service_account_json": service_account_json(),
             "impersonate_email": "bot@example.com",
             "enabled": "true",
         },
@@ -68,7 +72,7 @@ def test_settings_google_sa_write_only(client, db_session):
     client.post(
         "/settings/google",
         data={
-            "service_account_json": '{"type":"service_account","client_email":"secret@proj.iam"}',
+            "service_account_json": service_account_json("secret@proj.iam"),
             "impersonate_email": "admin@example.com",
             "enabled": "true",
         },
