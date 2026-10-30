@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-10-30
+
 ### Added
 - In-place Settings catalog, group, webhook and automation editing; webhook disable/re-enable and local payload previews; automation condition dry runs and latest actual execution outcomes.
 - Catalog search, owner/system filters, pagination and component detail pages; an accessible Maps list with directed relationships, catalog/incident links, search, fit/reset, stale/error feedback and retry.
@@ -75,5 +77,6 @@ All notable changes to this project are documented here. The format is based on
 ### Notes
 - Slack channels, Google Meet, Google SSO, and SMTP email invites are planned for later phases; connection fields exist but integrations are not yet wired.
 
+[0.1.0]: https://github.com/giammbo/incident-commander/releases/tag/v0.1.0
 [0.0.4]: https://github.com/giammbo/incident-commander/releases/tag/v0.0.4
 [Unreleased]: https://github.com/giammbo/incident-commander/commits/main
